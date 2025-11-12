@@ -11,8 +11,10 @@ import { useState, useEffect } from "react";
 export default function Home() {
   const { user, loading } = useAuth();
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [hotels, setHotels] = useState<any[]>([]);
+  const [loadingHotels, setLoadingHotels] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load favorites from localStorage
   useEffect(() => {
     const savedFavorites = localStorage.getItem("favorites");
     if (savedFavorites) {
@@ -20,7 +22,24 @@ export default function Home() {
     }
   }, []);
 
-  // Save favorites to localStorage
+  useEffect(() => {
+  setLoadingHotels(true);
+  setError(null);
+  import("@/lib/amadeus").then(({ searchHotels }) => {
+    searchHotels("NYC")
+      .then((data) => {
+        console.log("Amadeus hotels data:", data); // <--- check structure
+        setHotels(data || []);
+        setLoadingHotels(false);
+      })
+      .catch((err) => {
+        setError("Failed to fetch hotels. Try again later.");
+        setLoadingHotels(false);
+      });
+  });
+}, []);
+
+
   const handleFavorite = (hotelId: string) => {
     setFavorites((prev) => {
       const updated = prev.includes(hotelId)
@@ -33,19 +52,27 @@ export default function Home() {
 
   const handleBook = (hotelId: string) => {
     if (!user) {
-      // Redirect to sign-in page
       redirect("/signin");
     } else {
       redirect(`/booking/${hotelId}`);
     }
   };
 
-  // Show loading state
-  if (loading) {
+  if (loading || loadingHotels) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
         <div className="text-center">
           <p className="text-lg text-zinc-600 dark:text-zinc-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-black">
+        <div className="text-center">
+          <p className="text-lg text-red-600">{error}</p>
         </div>
       </div>
     );
@@ -74,16 +101,27 @@ export default function Home() {
           initial="initial"
           animate="animate"
         >
-          {MOCK_HOTELS.map((hotel) => (
-            <motion.div key={hotel.id} variants={staggerItem}>
-              <HotelCard
-                hotel={hotel}
-                isFavorited={favorites.includes(hotel.id)}
-                onFavorite={handleFavorite}
-                onBook={handleBook}
-              />
-            </motion.div>
-          ))}
+          {hotels.map((hotel: any) => (
+  <motion.div key={hotel.hotelId || hotel.id} variants={staggerItem}>
+    <HotelCard
+      hotel={{
+        id: hotel.hotelId || hotel.id,
+        name: hotel.name,
+        description: hotel.description || hotel.name,
+        location: hotel.cityCode || hotel.location,
+        price: hotel.offers?.[0]?.price?.total || 0, // use actual API price
+        rating: hotel.rating || 0,
+        reviews: hotel.reviews || 0,
+        image: hotel.media?.[0]?.uri || "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=500&h=400&fit=crop",
+        amenities: hotel.amenities || [],
+        availability: hotel.availability || 0,
+      }}
+      isFavorited={favorites.includes(hotel.hotelId || hotel.id)}
+      onFavorite={handleFavorite}
+      onBook={handleBook}
+    />
+  </motion.div>
+))}
         </motion.div>
       </motion.div>
     </div>

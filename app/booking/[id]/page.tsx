@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { fadeInUp } from "@/lib/animations";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -21,6 +21,7 @@ export default function BookingPage() {
   const [checkOutDate, setCheckOutDate] = useState("");
   const [guests, setGuests] = useState("1");
   const [bookingSubmitted, setBookingSubmitted] = useState(false);
+  const [hours, setHours] = useState(3); // default to 3 hours
 
   // Redirect to home if not authenticated
   if (loading) {
@@ -35,20 +36,44 @@ export default function BookingPage() {
     redirect("/");
   }
 
-  // Find hotel
-  const hotel = MOCK_HOTELS.find((h) => h.id === hotelId);
+  // Fetch hotel offer from Amadeus API
+  const [hotel, setHotel] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    import("@/lib/amadeus").then(({ searchHotelOffers }) => {
+      // Use last searched city from localStorage or default to Manila
+      const lastCity = localStorage.getItem("lastHotelSearch") || "Manila";
+      searchHotelOffers("MNL")
+        .then((data) => {
+          const found = data.find((h: any) => h.hotel.hotelId === hotelId || h.hotel.id === hotelId);
+          if (found) setHotel({
+            ...found.hotel,
+            price: found.offers?.[0]?.price?.total ? Number(found.offers[0].price.total) : 0,
+          });
+          else setError("Hotel not found");
+        })
+        .catch((err) => setError(err.message || "Failed to fetch hotel offer."));
+    });
+  }, [hotelId]);
 
-  if (!hotel) {
+  if (error) {
     return (
       <div className="min-h-screen bg-zinc-50 dark:bg-black py-12 px-4">
         <div className="max-w-2xl mx-auto text-center">
           <h1 className="text-3xl font-bold text-black dark:text-white mb-4">
-            Hotel not found
+            {error}
           </h1>
           <Button onClick={() => redirect("/")} className="bg-blue-600 hover:bg-blue-700">
             Back to Hotels
           </Button>
         </div>
+      </div>
+    );
+  }
+  if (!hotel) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-lg text-zinc-600 dark:text-zinc-400">Loading hotel...</p>
       </div>
     );
   }
@@ -88,7 +113,7 @@ export default function BookingPage() {
                   <div>
                     <h3 className="font-semibold mb-2 text-black dark:text-white">Amenities</h3>
                     <div className="flex flex-wrap gap-2">
-                      {hotel.amenities.map((amenity, idx) => (
+                      {hotel.amenities.map((amenity: string, idx: number) => (
                         <Badge key={idx} variant="secondary">
                           {amenity}
                         </Badge>
@@ -160,10 +185,29 @@ export default function BookingPage() {
                           ${hotel.price}
                         </span>
                       </div>
+                      {hotel.hourlyCostRange && (
+                        <div className="flex flex-col gap-2 mb-2">
+                          <span className="text-zinc-600 dark:text-zinc-400">Hourly Cost Range</span>
+                          <span className="font-semibold text-black dark:text-white">
+                            ${hotel.hourlyCostRange.min} - ${hotel.hourlyCostRange.max} / hour
+                          </span>
+                          <label className="text-sm text-zinc-600 dark:text-zinc-400 mt-2">Select hours of stay</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="12"
+                            value={hours}
+                            onChange={e => setHours(Number(e.target.value))}
+                            className="w-full border rounded px-2 py-1 mt-1"
+                          />
+                        </div>
+                      )}
                       <div className="flex justify-between font-bold text-lg">
                         <span className="text-black dark:text-white">Total</span>
                         <span className="text-black dark:text-white">
-                          ${hotel.price * 3}
+                          {hotel.hourlyCostRange
+                            ? `$${Math.round(((hotel.hourlyCostRange.min + hotel.hourlyCostRange.max) / 2) * hours)}`
+                            : `$${hotel.price * 3}`}
                         </span>
                       </div>
                     </div>
