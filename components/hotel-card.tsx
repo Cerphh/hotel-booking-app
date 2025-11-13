@@ -7,6 +7,14 @@ interface HotelCardProps {
 }
 
 export const HotelCard: React.FC<HotelCardProps> = ({ hotel }) => {
+  // Build full location string
+  const locationParts = [
+    hotel.barangay,
+    hotel.city,
+    hotel.province
+  ].filter(Boolean); // removes undefined/null
+  const fullLocation = locationParts.join(", ");
+
   return (
     <div className="relative bg-white rounded-2xl shadow-md overflow-hidden border border-gray-100 hover:shadow-lg transition-all duration-200">
       <div className="relative h-48 w-full bg-gray-100">
@@ -28,7 +36,7 @@ export const HotelCard: React.FC<HotelCardProps> = ({ hotel }) => {
 
       <div className="p-4 space-y-1">
         <h3 className="text-lg font-semibold">{hotel.name}</h3>
-        <p className="text-sm text-gray-600">{hotel.location}</p>
+        <p className="text-sm text-gray-600">{fullLocation || hotel.location}</p>
 
         {hotel.roomType && (
           <p className="text-sm">
