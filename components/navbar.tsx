@@ -33,7 +33,7 @@ export function Navbar() {
               <span className="text-white font-bold text-lg">H</span>
             </div>
             <span className="font-bold text-xl text-black dark:text-white hidden sm:inline">
-              Hotbook
+              HotBook
             </span>
           </Link>
 
