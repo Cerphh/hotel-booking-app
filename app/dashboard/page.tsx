@@ -29,23 +29,32 @@ interface Booking {
   guests: number;
   totalPrice: number;
   createdAt?: Timestamp;
+  hotelImage?: string;
+}
+
+interface Hotel {
+  id: string;
+  name: string;
+  location: string;
+  description?: string;
+  price?: number;
+  image?: string;
+  amenities?: string[];
 }
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
 
-  // -----------------------
-  // State (always define hooks first!)
-  // -----------------------
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  const [favorites, setFavorites] = useState<Hotel[]>([]);
+  const [loadingFavorites, setLoadingFavorites] = useState(true);
+
   const db = getFirestore(app);
 
-  // -----------------------
-  // Fetch bookings by userEmail safely inside useEffect
-  // -----------------------
+  // Fetch bookings
   useEffect(() => {
     if (!user?.email) {
       setLoadingBookings(false);
@@ -84,9 +93,22 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [user?.email, db]);
 
-  // -----------------------
-  // Redirect / Loading (outside hooks, safe)
-  // -----------------------
+  // Load favorites from localStorage
+  useEffect(() => {
+    setLoadingFavorites(true);
+    const saved = localStorage.getItem("favorites");
+    if (saved) {
+      setFavorites(JSON.parse(saved));
+    }
+    setLoadingFavorites(false);
+  }, []);
+
+  const removeFavorite = (hotelId: string) => {
+    const updated = favorites.filter((h) => h.id !== hotelId);
+    setFavorites(updated);
+    localStorage.setItem("favorites", JSON.stringify(updated));
+  };
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -97,9 +119,6 @@ export default function Dashboard() {
 
   if (!user) redirect("/");
 
-  // -----------------------
-  // Render
-  // -----------------------
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black py-8">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -121,67 +140,71 @@ export default function Dashboard() {
             {/* Bookings Tab */}
             <TabsContent value="bookings" className="space-y-4">
               {loadingBookings ? (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                  <Card>
-                    <CardContent className="text-center py-12">
-                      <p className="text-zinc-600 dark:text-zinc-400">Loading your bookings...</p>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                <div className="flex justify-center py-12">
+                  <div className="w-12 h-12 border-4 border-blue-500 border-dashed rounded-full animate-spin"></div>
+                </div>
               ) : fetchError ? (
-                <motion.div initial="initial" animate="animate" variants={fadeInUp}>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Error Loading Bookings</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-red-600 dark:text-red-400">{fetchError}</p>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-500 mt-2">
-                        Open your Firebase console and create the required index to fix this issue.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Error Loading Bookings</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-red-600 dark:text-red-400">{fetchError}</p>
+                    <p className="text-sm text-zinc-500 dark:text-zinc-500 mt-2">
+                      Open your Firebase console and create the required index to fix this issue.
+                    </p>
+                  </CardContent>
+                </Card>
               ) : bookings.length === 0 ? (
-                <motion.div initial="initial" animate="animate" variants={fadeInUp}>
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>My Bookings</CardTitle>
-                      <CardDescription>View and manage your hotel reservations</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-center py-12">
-                        <p className="text-zinc-600 dark:text-zinc-400 mb-4">No bookings yet</p>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                          Start exploring hotels and make your first booking
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>My Bookings</CardTitle>
+                    <CardDescription>View and manage your hotel reservations</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center py-12">
+                      <p className="text-zinc-600 dark:text-zinc-400 mb-4">No bookings yet</p>
+                      <p className="text-sm text-zinc-500 dark:text-zinc-500">
+                        Start exploring hotels and make your first booking
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
               ) : (
-                <motion.div className="space-y-4" initial="initial" animate="animate" variants={staggerContainer}>
+                // Grid 2 per row
+                <motion.div
+                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                  variants={staggerContainer}
+                  initial="initial"
+                  animate="animate"
+                >
                   {bookings.map((booking) => (
                     <motion.div key={booking.id} variants={staggerItem}>
                       <Card>
-                        <CardHeader>
-                          <CardTitle>{booking.hotelName}</CardTitle>
-                          <CardDescription>{booking.hotelLocation}</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <p>
-                            <span className="font-semibold">Check-in:</span> {booking.checkInDate}
-                          </p>
-                          <p>
-                            <span className="font-semibold">Check-out:</span> {booking.checkOutDate}
-                          </p>
-                          <p>
-                            <span className="font-semibold">Guests:</span> {booking.guests}
-                          </p>
-                          <p>
-                            <span className="font-semibold">Total Price:</span> ${booking.totalPrice}
-                          </p>
-                        </CardContent>
+                        <div className="flex flex-col md:flex-row">
+                          {/* Left: Booking info */}
+                          <div className="flex-1 p-4">
+                            <CardHeader>
+                              <CardTitle>{booking.hotelName}</CardTitle>
+                              <CardDescription>{booking.hotelLocation}</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                              <p><span className="font-semibold">Check-in:</span> {booking.checkInDate}</p>
+                              <p><span className="font-semibold">Check-out:</span> {booking.checkOutDate}</p>
+                              <p><span className="font-semibold">Guests:</span> {booking.guests}</p>
+                              <p><span className="font-semibold">Total Price:</span> ${booking.totalPrice}</p>
+                            </CardContent>
+                          </div>
+
+                          {/* Right: Hotel image */}
+                          <div className="flex-1 md:flex-[2] h-48 md:h-auto w-full overflow-hidden rounded-r-lg">
+                            <img
+                              src={booking.hotelImage || "/placeholder.jpg"}
+                              alt={booking.hotelName}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        </div>
                       </Card>
                     </motion.div>
                   ))}
@@ -191,7 +214,11 @@ export default function Dashboard() {
 
             {/* Favorites Tab */}
             <TabsContent value="favorites" className="space-y-4">
-              <motion.div initial="initial" animate="animate" variants={fadeInUp}>
+              {loadingFavorites ? (
+                <div className="flex justify-center py-12">
+                  <div className="w-12 h-12 border-4 border-blue-500 border-dashed rounded-full animate-spin"></div>
+                </div>
+              ) : favorites.length === 0 ? (
                 <Card>
                   <CardHeader>
                     <CardTitle>Saved Hotels</CardTitle>
@@ -204,7 +231,42 @@ export default function Dashboard() {
                     </div>
                   </CardContent>
                 </Card>
-              </motion.div>
+              ) : (
+                <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" variants={staggerContainer} initial="initial" animate="animate">
+                  {favorites.map((hotel) => (
+                    <motion.div key={hotel.id} variants={staggerItem}>
+                      <Card className="flex flex-col">
+                        <div className="h-48 w-full overflow-hidden rounded-t-lg">
+                          <img src={hotel.image || "/placeholder.jpg"} alt={hotel.name} className="w-full h-full object-cover" />
+                        </div>
+                        <CardHeader>
+                          <CardTitle>{hotel.name}</CardTitle>
+                          <CardDescription>{hotel.location}</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {hotel.description && <p className="text-sm text-zinc-500 dark:text-zinc-400">{hotel.description}</p>}
+                          {hotel.amenities && hotel.amenities.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {hotel.amenities.map((amenity, idx) => (
+                                <Badge key={idx} variant="secondary">{amenity}</Badge>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-sm text-zinc-500 dark:text-zinc-400">Price: {hotel.price ? `$${hotel.price}` : "N/A"}</p>
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => removeFavorite(hotel.id)}
+                              className="px-3 py-1 text-white bg-red-600 rounded-lg hover:bg-red-700 transition"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              )}
             </TabsContent>
 
             {/* Profile Tab */}

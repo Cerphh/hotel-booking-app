@@ -28,9 +28,9 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link href="/" className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-linear-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">H</span>
+          <Link href="/hotels" className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-linear-to-br from-orange-600 to-red-600 rounded-lg flex items-center justify-center">
+              <span className="text-black font-bold text-lg">H</span>
             </div>
             <span className="font-bold text-xl text-black dark:text-white hidden sm:inline">
               HotBook
@@ -112,12 +112,6 @@ export function Navbar() {
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-zinc-200 dark:border-zinc-800 py-4 space-y-2">
-            <Link
-              href="/"
-              className="block px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 rounded"
-            >
-              Home
-            </Link>
             <Link
               href="/hotels"
               className="block px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 rounded"
