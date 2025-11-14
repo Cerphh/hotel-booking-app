@@ -1,51 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import axios from "axios";
+import { searchHotelsByCity, OSMHotel } from "@/lib/osm-hotels";
+import { LiteHotelOffer } from "@/lib/liteapi";
+
+interface Hotel extends OSMHotel {
+  offers?: LiteHotelOffer[];
+}
 
 export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+
+  const lat = parseFloat(searchParams.get("lat") || "0");
+  const lon = parseFloat(searchParams.get("lon") || "0");
+  const checkIn = searchParams.get("checkIn") || "2025-11-14";
+  const checkOut = searchParams.get("checkOut") || "2025-11-15";
+
   try {
-    const { searchParams } = new URL(req.url);
-    const lat = searchParams.get("lat");
-    const lon = searchParams.get("lon");
-    const checkIn = searchParams.get("checkIn");
-    const checkOut = searchParams.get("checkOut");
+    // Fetch OSM + LiteAPI enriched hotels
+    const osmHotels: OSMHotel[] = await searchHotelsByCity("Batangas");
 
-    if (!lat || !lon || !checkIn || !checkOut) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
-    }
+    const hotels: Hotel[] = osmHotels.map((h) => ({
+      ...h,
+      offers: h.offers ?? [],
+    }));
 
-    // 1️⃣ Get Amadeus access token
-    const tokenRes = await axios.post(
-      "https://test.api.amadeus.com/v1/security/oauth2/token",
-      new URLSearchParams({
-        grant_type: "client_credentials",
-        client_id: process.env.AMADEUS_CLIENT_ID!,
-        client_secret: process.env.AMADEUS_CLIENT_SECRET!,
-      })
-    );
-    const accessToken = tokenRes.data.access_token;
-
-    // 2️⃣ Call Amadeus Hotel Search API
-    const hotelRes = await axios.get(
-      "https://test.api.amadeus.com/v2/shopping/hotel-offers",
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-        params: {
-          latitude: lat,
-          longitude: lon,
-          checkInDate: checkIn,
-          checkOutDate: checkOut,
-          radius: 5, // search radius in km
-          roomQuantity: 1,
-          adults: 1,
-        },
-      }
-    );
-
-    return NextResponse.json(hotelRes.data.data || []);
-  } catch (err: any) {
-    console.error("API error:", err.response?.data || err.message || err);
-    return NextResponse.json({ error: "Failed to fetch hotel offers" }, { status: 500 });
+    return NextResponse.json(hotels);
+  } catch (err) {
+    console.error("API route error:", err);
+    return NextResponse.json([], { status: 500 });
   }
 }

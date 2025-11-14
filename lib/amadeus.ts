@@ -32,7 +32,7 @@ export async function fetchHotelOffers({
         roomType: offer.room?.type,
         price: offer.price?.total,
         currency: offer.price?.currency,
-        amenities: offer.room?.amenities || [], // Amadeus may provide amenities
+        amenities: offer.room?.amenities || [],
       })) || []
     );
   } catch (err) {

@@ -14,14 +14,22 @@ import { ThemeToggle } from "./theme-toggle";
 import Link from "next/link";
 import { Menu } from "lucide-react";
 import { useState } from "react";
+import { usePathname } from "next/navigation"; // <-- to detect current page
 
 export function Navbar() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const pathname = usePathname(); // current path
 
   const handleLogout = async () => {
     await logout();
   };
+
+  const navLinks = [
+    { href: "/hotels", label: "Hotels" },
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "#", label: "About" },
+  ];
 
   return (
     <nav className="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950">
@@ -38,16 +46,21 @@ export function Navbar() {
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            <Link href="/hotels" className="text-sm font-medium text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-white transition">
-              Hotels
-            </Link>
-            <Link href="/dashboard" className="text-sm font-medium text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-white transition">
-              Dashboard
-            </Link>
-            <a href="#" className="text-sm font-medium text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-white transition">
-              About
-            </a>
+          <div className="hidden md:flex items-center space-x-4">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`px-4 py-2 text-sm font-medium transition 
+                  ${
+                    pathname === link.href
+                      ? "bg-blue-600 text-white rounded-full"
+                      : "text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-white"
+                  }`}
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
 
           {/* User Menu / Auth Buttons */}
@@ -71,9 +84,7 @@ export function Navbar() {
                     <p className="text-sm font-medium text-black dark:text-white">
                       {user.displayName}
                     </p>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {user.email}
-                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
@@ -112,24 +123,20 @@ export function Navbar() {
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-zinc-200 dark:border-zinc-800 py-4 space-y-2">
-            <Link
-              href="/hotels"
-              className="block px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 rounded"
-            >
-              Hotels
-            </Link>
-            <Link
-              href="/dashboard"
-              className="block px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 rounded"
-            >
-              Dashboard
-            </Link>
-            <a
-              href="#"
-              className="block px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900 rounded"
-            >
-              About
-            </a>
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`block px-4 py-2 text-sm font-medium rounded transition
+                  ${
+                    pathname === link.href
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
+                  }`}
+              >
+                {link.label}
+              </Link>
+            ))}
           </div>
         )}
       </div>

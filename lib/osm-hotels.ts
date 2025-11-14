@@ -1,79 +1,30 @@
 import axios from "axios";
+import liteApi from "liteapi-node-sdk";
 
 export interface Hotel {
-  province?: string;
-  city?: string;
-  barangay?: string;
-  amenities?: boolean;
-  roomType?: string;
-  pricePerNight?: number;
   id: string;
   name: string;
   location: string;
   latitude: number;
   longitude: number;
+  price?: number;
+  currency?: string;
+  roomType?: string;
+  amenities?: string[];
+  availability?: number;
+  imageUrl?: string;
+  address?: string;
 }
 
-// Metro Manila cities + CALABARZON provinces + other major cities
+// LiteAPI client
+const liteClient = liteApi(process.env.LITEAPI_KEY!);
+
 export const CITY_CENTERS: Record<string, { lat: number; lon: number }> = {
-  // Metro Manila cities
-  "Manila": { lat: 14.5995, lon: 120.9842 },
-  "Quezon City": { lat: 14.6760, lon: 121.0437 },
-  "Makati": { lat: 14.5547, lon: 121.0244 },
-  "Pasig": { lat: 14.5764, lon: 121.0851 },
-  "Taguig": { lat: 14.5176, lon: 121.0509 },
-  "Mandaluyong": { lat: 14.5804, lon: 121.0359 },
-  "Parañaque": { lat: 14.4958, lon: 120.9972 },
-  "Las Piñas": { lat: 14.4546, lon: 120.9885 },
-  "Muntinlupa": { lat: 14.4117, lon: 121.0467 },
-  "Navotas": { lat: 14.4386, lon: 120.9371 },
-  "Valenzuela": { lat: 14.7019, lon: 120.9863 },
-  "Caloocan": { lat: 14.6760, lon: 120.9819 },
-  "Malabon": { lat: 14.6588, lon: 120.9638 },
-  "Marikina": { lat: 14.6500, lon: 121.1023 },
-  "Pasay": { lat: 14.5347, lon: 121.0013 },
-
-  // CALABARZON provinces
-  "Cavite": { lat: 14.4743, lon: 120.8786 },
-  "Laguna": { lat: 14.1797, lon: 121.2431 },
-  "Batangas": { lat: 13.7569, lon: 121.0583 },
-  "Rizal": { lat: 14.6101, lon: 121.1270 },
-  "Quezon": { lat: 13.9356, lon: 121.6093 },
-
-  // Other major cities
-  "Cebu": { lat: 10.3157, lon: 123.8854 },
-  "Davao del Sur": { lat: 6.7466, lon: 125.2050 },
-  "Baguio": { lat: 16.4023, lon: 120.5960 },
-  "Palawan": { lat: 9.8349, lon: 118.7380 },
+  Batangas: { lat: 13.7569, lon: 121.0583 },
 };
 
 const OVERPASS_URL = "https://lz4.overpass-api.de/api/interpreter";
 
-// sleep helper
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// smaller radius for dense cities
-const RADIUS_MAP: Record<string, number> = {
-  "Manila": 1500,
-  "Quezon City": 1500,
-  "Makati": 1500,
-  "Pasig": 1500,
-  "Taguig": 1500,
-  "Mandaluyong": 1500,
-  "Parañaque": 1500,
-  "Las Piñas": 1500,
-  "Muntinlupa": 1500,
-  "Navotas": 1500,
-  "Valenzuela": 1500,
-  "Caloocan": 1500,
-  "Malabon": 1500,
-  "Marikina": 1500,
-  "Pasay": 1500,
-};
-
-// fetch helper with exponential backoff
 async function fetchWithRetry(query: string, retries = 3): Promise<any> {
   for (let i = 0; i < retries; i++) {
     try {
@@ -83,47 +34,90 @@ async function fetchWithRetry(query: string, retries = 3): Promise<any> {
       });
       return res.data;
     } catch (err) {
-      const waitTime = (i + 1) * 3000; // 3s, 6s, 9s
-      console.warn(`Attempt ${i + 1} failed. Retrying in ${waitTime / 1000}s...`);
-      await sleep(waitTime);
+      await new Promise((r) => setTimeout(r, (i + 1) * 3000));
     }
   }
-  console.error("All retries failed for query");
   return null;
 }
 
-// Fetch hotels for a given city/province
-export async function searchHotelsByCity(
-  city: string,
-  radius: number = 5000
-): Promise<Hotel[]> {
+async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  try {
+    const res = await axios.get(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`
+    );
+    const addr = res.data.address;
+    return [
+      addr.suburb || addr.neighbourhood || addr.village || addr.hamlet,
+      addr.city || addr.town || addr.municipality || addr.village,
+      "Batangas",
+    ]
+      .filter(Boolean)
+      .join(", ");
+  } catch {
+    return "Batangas, Philippines";
+  }
+}
+
+export async function searchHotelsByCity(city: string): Promise<Hotel[]> {
   const center = CITY_CENTERS[city];
   if (!center) return [];
 
-  const radiusToUse = RADIUS_MAP[city] || radius;
+  const south = 13.5;
+  const west = 120.7;
+  const north = 14.1;
+  const east = 121.2;
 
-  const query = `
-    [out:json][timeout:25];
-    node["tourism"~"hotel|motel|hostel|apartment"](around:${radiusToUse},${center.lat},${center.lon});
+  const osmQuery = `
+    [out:json][timeout:60];
+    node["tourism"~"hotel|motel|hostel|apartment"](${south},${west},${north},${east});
     out center;
   `;
 
-  const data = (await fetchWithRetry(query))?.elements || [];
+  const osmData = (await fetchWithRetry(osmQuery))?.elements || [];
 
-  const hotels: Hotel[] = data.map((el: any) => {
-    const cityName = el.tags?.addr_city || el.tags?.addr_town || city;
-    const province = el.tags?.addr_state || el.tags?.addr_region || "";
-    return {
-      id: el.id.toString(),
-      name: el.tags?.name || "Unnamed Hotel",
-      location: province ? `${cityName}, ${province}` : cityName,
-      latitude: el.lat,
-      longitude: el.lon,
-    };
-  });
+  // Only slice to 300 to avoid overload
+  const hotels = await Promise.all(
+    osmData.slice(0, 300).map(async (el: any) => {
+      if (!el.lat || !el.lon) return null;
 
-  // Throttle next request to avoid API overload
-  await sleep(3000);
+      const exactAddress = await reverseGeocode(el.lat, el.lon);
 
-  return hotels;
+      const hotel: Hotel = {
+        id: el.id.toString(),
+        name: el.tags?.name || "Unnamed Hotel",
+        location: el.tags?.addr_city || "Batangas, Philippines",
+        latitude: el.lat,
+        longitude: el.lon,
+        address: exactAddress,
+        imageUrl: `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(el.tags?.name || "hotel")}`,
+      };
+
+      // Fetch LiteAPI offers in parallel but safely
+      try {
+        const liteOffers = await liteClient.getFullRates({
+          latitude: hotel.latitude,
+          longitude: hotel.longitude,
+          checkin: new Date().toISOString().split("T")[0],
+          checkout: new Date(Date.now() + 86400000).toISOString().split("T")[0],
+          limit: 1,
+          currency: "PHP",
+        });
+
+        const data = liteOffers?.data;
+        if (data && Array.isArray(data) && data.length > 0) {
+          const best = data[0];
+          hotel.price = best?.price?.amount ?? undefined;
+          hotel.currency = best?.price?.currency ?? "PHP";
+          hotel.roomType = best?.room_type ?? undefined;
+          hotel.amenities = Array.isArray(best?.amenities) ? best.amenities : [];
+          hotel.availability = typeof best?.rooms_available === "number" ? best.rooms_available : undefined;
+          hotel.imageUrl = best?.images?.[0] ?? hotel.imageUrl;
+        }
+      } catch {}
+
+      return hotel;
+    })
+  );
+
+  return hotels.filter(Boolean) as Hotel[];
 }
