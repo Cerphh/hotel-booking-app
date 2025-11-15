@@ -1,53 +1,34 @@
 import axios from "axios";
-
-if (!process.env.LITEAPI_URL || !process.env.LITEAPI_KEY) {
-  throw new Error("LITEAPI_URL and LITEAPI_KEY must be set in .env");
-}
+import { fetchHotelOffers as getAmadeusOffers, HotelRoomOffer } from "./amadeus";
 
 const liteApiClient = axios.create({
-  baseURL: process.env.LITEAPI_URL,
-  headers: {
-    Authorization: `Bearer ${process.env.LITEAPI_KEY}`,
-    "Content-Type": "application/json",
-  },
+  baseURL: "https://api.liteapi.travel",
+  timeout: 5000,
 });
 
-export interface LiteHotelOffer {
-  price?: number;
-  currency?: string;
-  roomType?: string;
-  amenities: string[];
-  availability: number;
-  imageUrl: string;
-  address: string;
-}
-
-export async function fetchLiteHotelOffers(params: {
+interface LiteApiParams {
   lat: number;
   lon: number;
   checkIn: string;
   checkOut: string;
-}): Promise<LiteHotelOffer[]> {
+}
+
+export async function fetchLiteHotelOffers(params: LiteApiParams): Promise<HotelRoomOffer[]> {
   try {
-    // ✅ Ensure baseURL is valid
     const resp = await liteApiClient.get("/hotels", { params });
 
-    if (!resp.data || !Array.isArray(resp.data.hotels)) {
-      console.warn("LiteAPI returned no data or invalid format for", params);
-      return [];
-    }
+    if (!resp.data?.hotels) return [];
 
-    return resp.data.hotels.map((h: any) => ({
-      price: h?.price?.amount ?? undefined,
-      currency: h?.price?.currency ?? "PHP",
-      roomType: h?.room_type ?? "N/A",
-      amenities: Array.isArray(h?.amenities) ? h.amenities : [],
-      availability: typeof h?.availability_count === "number" ? h.availability_count : 0,
-      imageUrl: h?.image ?? "https://via.placeholder.com/400x300",
-      address: h?.address ?? "Batangas, Philippines",
+    return resp.data.hotels.map((h: any): HotelRoomOffer => ({
+      roomType: h.roomType || "Unknown",
+      price: h.price || undefined,
+      currency: h.currency || "USD",
+      amenities: h.amenities || [],
     }));
-  } catch (error) {
-    console.error("LiteAPI fetch error:", error);
-    return [];
+  } catch (err) {
+    console.error("LiteAPI error", err);
+
+    // fallback to Amadeus if LiteAPI fails
+    return await getAmadeusOffers(params);
   }
 }

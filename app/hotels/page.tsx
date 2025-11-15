@@ -9,12 +9,23 @@ import { staggerContainer, staggerItem } from "@/lib/animations";
 import { searchHotelsByCity, Hotel as OSMHotel } from "@/lib/osm-hotels";
 import axios from "axios";
 import dynamic from "next/dynamic";
+import { useMap } from "react-leaflet";
 
 // Leaflet dynamic import
 let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
   L = require("leaflet");
+
+  // Fix marker icons in Next.js / React-Leaflet
+  delete L.Icon.Default.prototype._getIconUrl;
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  });
 }
+
+// Dynamic imports for Leaflet components
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import("react-leaflet").then((mod) => mod.Marker), { ssr: false });
@@ -39,7 +50,7 @@ const checkOut = (() => {
 
 const reverseCache = new Map<string, string>();
 
-// ✅ Fixed reverse geocode with retries
+// Reverse geocode to get exact address
 async function getExactAddress(lat: number, lon: number, retries = 3): Promise<string> {
   const key = `${lat},${lon}`;
   if (reverseCache.has(key)) return reverseCache.get(key)!;
@@ -51,7 +62,6 @@ async function getExactAddress(lat: number, lon: number, retries = 3): Promise<s
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-
       const addr = data.address || {};
       const parts = [
         addr.suburb || addr.neighbourhood || addr.village || addr.hamlet,
@@ -69,6 +79,17 @@ async function getExactAddress(lat: number, lon: number, retries = 3): Promise<s
   }
 
   return "Batangas, Philippines";
+}
+
+// Map wrapper to auto zoom
+function AutoFitMap({ hotel }: { hotel: Hotel }) {
+  const map = useMap();
+  useEffect(() => {
+    if (hotel && map) {
+      map.setView([hotel.latitude, hotel.longitude], 16);
+    }
+  }, [hotel, map]);
+  return null;
 }
 
 export default function HotelsPage() {
@@ -109,14 +130,14 @@ export default function HotelsPage() {
             imageUrl: osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
           };
 
-          // Immediately render hotel
+          // Render hotel immediately
           setHotels((prev) => {
             const updated = [...prev, hotel];
             setFilteredHotels(updated);
             return updated;
           });
 
-          // Reverse geocode async
+          // Fetch exact address asynchronously
           getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
             setHotels((prev) =>
               prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h))
@@ -126,7 +147,7 @@ export default function HotelsPage() {
             );
           });
 
-          // LiteAPI fetch async
+          // Fetch offers from LiteAPI asynchronously
           axios
             .get("/api/hotels", {
               params: {
@@ -240,6 +261,7 @@ export default function HotelsPage() {
           <p className="text-zinc-600 dark:text-zinc-400 mb-8">Where Every Stay Feels Right.</p>
         </div>
 
+        {/* Search bar */}
         <div className="sticky top-16 z-50 bg-zinc-50 dark:bg-black flex gap-2 mb-6 w-1/3 p-0">
           <div className="relative flex-1">
             <Input
@@ -262,6 +284,7 @@ export default function HotelsPage() {
           </button>
         </div>
 
+        {/* Loading */}
         {hotels.length === 0 && loading && (
           <div className="flex flex-col items-center py-20">
             <div className="w-12 h-12 border-4 border-blue-500 border-dashed rounded-full animate-spin"></div>
@@ -269,6 +292,7 @@ export default function HotelsPage() {
           </div>
         )}
 
+        {/* Hotel cards */}
         {filteredHotels.length > 0 && (
           <motion.div
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
@@ -342,6 +366,44 @@ export default function HotelsPage() {
               </motion.div>
             ))}
           </motion.div>
+        )}
+
+        {/* Map Modal */}
+        {selectedHotel && L && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+            <div className="relative w-11/12 md:w-3/4 h-2/3 rounded-xl overflow-hidden shadow-lg">
+              {/* Close button */}
+              <button
+                onClick={handleCloseMap}
+                className="absolute top-2 right-2 z-[999] text-white bg-red-500 rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 text-lg font-bold"
+              >
+                ×
+              </button>
+              <MapContainer
+                center={[selectedHotel.latitude, selectedHotel.longitude]}
+                zoom={16}
+                scrollWheelZoom
+                style={{ width: "100%", height: "100%" }}
+              >
+                <AutoFitMap hotel={selectedHotel} />
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                />
+                <Marker position={[selectedHotel.latitude, selectedHotel.longitude]}>
+                  <Popup>
+                    <div>
+                      <h3 className="font-bold">{selectedHotel.name}</h3>
+                      <p>{selectedHotel.address}</p>
+                      {selectedHotel.price && (
+                        <p>₱{selectedHotel.price.toLocaleString()} / {selectedHotel.currency ?? "PHP"}</p>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              </MapContainer>
+            </div>
+          </div>
         )}
       </motion.div>
     </div>
