@@ -27,11 +27,18 @@ import {
 } from "firebase/firestore";
 import app from "@/lib/firebase";
 import dynamic from "next/dynamic";
+import { useMap } from "react-leaflet";
 
 // Dynamic Leaflet imports
 let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
   L = require("leaflet");
+  delete L.Icon.Default.prototype._getIconUrl;
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+  });
 }
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -68,6 +75,7 @@ interface Hotel {
   amenities?: string[];
 }
 
+// Helper to reverse geocode
 async function getExactAddress(lat: number, lon: number): Promise<string> {
   try {
     const res = await fetch(
@@ -87,6 +95,20 @@ async function getExactAddress(lat: number, lon: number): Promise<string> {
   }
 }
 
+// AutoFitMap component to center map on coords
+function AutoFitMap({ coords }: { coords: { lat: number; lon: number } }) {
+  const map = useMap();
+  useEffect(() => {
+    if (map && coords) {
+      map.setView([coords.lat, coords.lon], 15, { animate: true });
+      setTimeout(() => {
+        map.invalidateSize(); // ensures marker renders correctly
+      }, 100);
+    }
+  }, [map, coords]);
+  return null;
+}
+
 export default function Dashboard() {
   const { user, loading } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -103,7 +125,7 @@ export default function Dashboard() {
 
   const db = getFirestore(app);
 
-  // Fetch bookings
+  // Fetch bookings from Firestore
   useEffect(() => {
     if (!user?.email) {
       setLoadingBookings(false);
@@ -155,7 +177,7 @@ export default function Dashboard() {
     localStorage.setItem("favorites", JSON.stringify(updated));
   };
 
-  // Map coordinates for booking modal
+  // Fetch coordinates for map modal
   useEffect(() => {
     if (!mapBooking) return;
 
@@ -213,31 +235,22 @@ export default function Dashboard() {
         <motion.div initial="initial" animate="animate" variants={fadeInUp} transition={{ delay: 0.2 }}>
           <Tabs defaultValue="bookings" className="w-full">
             <TabsList className="grid w-full max-w-md grid-cols-3 mb-8 gap-2">
-              <TabsTrigger
-                value="bookings"
-                className="w-full h-full flex items-center justify-center text-center
+              <TabsTrigger value="bookings" className="w-full h-full flex items-center justify-center text-center
                   data-[state=active]:bg-blue-600 data-[state=active]:text-white
                   dark:data-[state=active]:bg-blue-600 dark:data-[state=active]:text-white
-                  rounded-full text-sm font-medium transition-all duration-300"
-              >
+                  rounded-full text-sm font-medium transition-all duration-300">
                 My Bookings
               </TabsTrigger>
-              <TabsTrigger
-                value="favorites"
-                className="w-full h-full flex items-center justify-center text-center
+              <TabsTrigger value="favorites" className="w-full h-full flex items-center justify-center text-center
                   data-[state=active]:bg-blue-600 data-[state=active]:text-white
                   dark:data-[state=active]:bg-blue-600 dark:data-[state=active]:text-white
-                  rounded-full text-sm font-medium transition-all duration-300"
-              >
+                  rounded-full text-sm font-medium transition-all duration-300">
                 Saved Hotels
               </TabsTrigger>
-              <TabsTrigger
-                value="profile"
-                className="w-full h-full flex items-center justify-center text-center
+              <TabsTrigger value="profile" className="w-full h-full flex items-center justify-center text-center
                   data-[state=active]:bg-blue-600 data-[state=active]:text-white
                   dark:data-[state=active]:bg-blue-600 dark:data-[state=active]:text-white
-                  rounded-full text-sm font-medium transition-all duration-300"
-              >
+                  rounded-full text-sm font-medium transition-all duration-300">
                 Profile
               </TabsTrigger>
             </TabsList>
@@ -277,13 +290,10 @@ export default function Dashboard() {
                   {bookings.map((booking) => (
                     <motion.div key={booking.id} variants={staggerItem}>
                       <Card className="flex flex-row items-center justify-between border border-black p-4">
-                        {/* Left: Hotel info */}
                         <div className="flex-1">
                           <CardTitle>{booking.hotelName}</CardTitle>
                           <CardDescription>{booking.hotelLocation}</CardDescription>
                         </div>
-
-                        {/* Right: Buttons */}
                         <div className="flex gap-2">
                           <button
                             onClick={() => setInfoBooking(booking)}
@@ -441,14 +451,14 @@ export default function Dashboard() {
                   scrollWheelZoom
                 >
                   <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                  <Marker
-                    position={[mapCoords.lat, mapCoords.lon]}
-                    icon={L.icon({
-                      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-                      iconAnchor: [12, 41],
-                    })}
-                  >
-                    <Popup>{mapAddress}</Popup>
+                  <AutoFitMap coords={mapCoords} />
+                  <Marker position={[mapCoords.lat, mapCoords.lon]}>
+                    <Popup>
+                      <div>
+                        <h3>{mapBooking.hotelName}</h3>
+                        <p>{mapAddress}</p>
+                      </div>
+                    </Popup>
                   </Marker>
                 </MapContainer>
               </div>
