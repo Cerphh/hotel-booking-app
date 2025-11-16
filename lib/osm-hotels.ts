@@ -33,13 +33,39 @@ async function fetchWithRetry(query: string, retries = 3): Promise<any> {
 }
 
 export async function searchHotelsByCity(city: string): Promise<Hotel[]> {
-  const bbox = `(13.5,120.7,14.1,121.2)`;
+  // If the requested city is Batangas (province), query Overpass for the Batangas
+  // administrative area so results are limited to the province boundaries.
+  const isBatangas = city?.toLowerCase().includes("batangas");
 
-  const query = `
-    [out:json][timeout:40];
-    node["tourism"~"hotel|motel|hostel|apartment"]${bbox};
-    out center;
-  `;
+  let query: string;
+  if (isBatangas) {
+    query = `
+      [out:json][timeout:40];
+      area["name"="Batangas"]["boundary"="administrative"]->.searchArea;
+      node["tourism"~"hotel|motel|hostel|apartment"](area.searchArea);
+      out center;
+    `;
+  } else {
+    // compute an approximate bbox around the city center when available
+    const center = CITY_CENTERS[city];
+    let bboxStr = `(13.5,120.7,14.1,121.2)`; // fallback bbox
+    if (center) {
+      const lat = center.lat;
+      const lon = center.lon;
+      const delta = 0.4; // ~40km box
+      const south = lat - delta;
+      const west = lon - delta;
+      const north = lat + delta;
+      const east = lon + delta;
+      bboxStr = `(${south},${west},${north},${east})`;
+    }
+
+    query = `
+      [out:json][timeout:40];
+      node["tourism"~"hotel|motel|hostel|apartment"]${bboxStr};
+      out center;
+    `;
+  }
 
   const data = await fetchWithRetry(query);
   if (!data?.elements) return [];

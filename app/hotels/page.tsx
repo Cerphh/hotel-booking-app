@@ -10,13 +10,20 @@ import { searchHotelsByCity, Hotel as OSMHotel } from "@/lib/osm-hotels";
 import axios from "axios";
 import dynamic from "next/dynamic";
 import { useMap } from "react-leaflet";
+import {
+  getFirestore,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  FirestoreError,
+} from "firebase/firestore";
+import app from "@/lib/firebase";
 
-// Leaflet dynamic import
 let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
   L = require("leaflet");
 
-  // Fix marker icons in Next.js / React-Leaflet
   delete L.Icon.Default.prototype._getIconUrl;
   L.Icon.Default.mergeOptions({
     iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
@@ -25,7 +32,6 @@ if (typeof window !== "undefined") {
   });
 }
 
-// Dynamic imports for Leaflet components
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import("react-leaflet").then((mod) => mod.Marker), { ssr: false });
@@ -39,6 +45,8 @@ interface Hotel extends OSMHotel {
   availability?: number;
   imageUrl?: string;
   address?: string;
+  image?: string;
+  description?: string;
 }
 
 const checkIn = new Date().toISOString().split("T")[0];
@@ -50,7 +58,6 @@ const checkOut = (() => {
 
 const reverseCache = new Map<string, string>();
 
-// Reverse geocode to get exact address
 async function getExactAddress(lat: number, lon: number, retries = 3): Promise<string> {
   const key = `${lat},${lon}`;
   if (reverseCache.has(key)) return reverseCache.get(key)!;
@@ -81,7 +88,6 @@ async function getExactAddress(lat: number, lon: number, retries = 3): Promise<s
   return "Batangas, Philippines";
 }
 
-// Map wrapper to auto zoom
 function AutoFitMap({ hotel }: { hotel: Hotel }) {
   const map = useMap();
   useEffect(() => {
@@ -99,10 +105,10 @@ export default function HotelsPage() {
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [filteredHotels, setFilteredHotels] = useState<Hotel[]>([]);
   const [inputValue, setInputValue] = useState("");
-  const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
+  const [userBookings, setUserBookings] = useState<string[]>([]);
 
   useEffect(() => setMounted(true), []);
 
@@ -111,6 +117,30 @@ export default function HotelsPage() {
     const saved = localStorage.getItem("favorites");
     if (saved) setFavorites(JSON.parse(saved));
   }, [mounted]);
+
+  // Fetch user bookings from Firestore
+  useEffect(() => {
+    if (!mounted || !user?.email) {
+      setUserBookings([]);
+      return;
+    }
+
+    const db = getFirestore(app);
+    const q = query(collection(db, "bookings"), where("userEmail", "==", user.email));
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const bookedHotelIds = snapshot.docs.map((doc) => doc.data().hotelId || doc.data().id);
+        setUserBookings(bookedHotelIds);
+      },
+      (error: FirestoreError) => {
+        console.error("Error fetching user bookings:", error);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [mounted, user?.email]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -130,24 +160,14 @@ export default function HotelsPage() {
             imageUrl: osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
           };
 
-          // Render hotel immediately
-          setHotels((prev) => {
-            const updated = [...prev, hotel];
-            setFilteredHotels(updated);
-            return updated;
-          });
+          setHotels((prev) => [...prev, hotel]);
 
-          // Fetch exact address asynchronously
           getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
             setHotels((prev) =>
               prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h))
             );
-            setFilteredHotels((prev) =>
-              prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h))
-            );
           });
 
-          // Fetch offers from LiteAPI asynchronously
           axios
             .get("/api/hotels", {
               params: {
@@ -164,9 +184,6 @@ export default function HotelsPage() {
                 setHotels((prev) =>
                   prev.map((h) => (h.id === hotel.id ? { ...h, ...offer } : h))
                 );
-                setFilteredHotels((prev) =>
-                  prev.map((h) => (h.id === hotel.id ? { ...h, ...offer } : h))
-                );
               }
             })
             .catch(console.warn);
@@ -181,40 +198,88 @@ export default function HotelsPage() {
     fetchHotels();
   }, [mounted]);
 
-  const handleSearch = () => {
-    setSearching(true);
-    setTimeout(() => {
-      setSearchTerm(inputValue.trim());
-      setSearching(false);
-    }, 200);
-  };
 
+
+  // Update filtered hotels whenever input or hotels change
   useEffect(() => {
-    if (!searchTerm) {
+    const trimmedInput = inputValue.trim();
+
+    // If input is empty, show all hotels
+    if (trimmedInput === "") {
       setFilteredHotels(hotels);
+      setSearchLoading(false);
       return;
     }
-    const term = searchTerm.toLowerCase();
-    const keywords = term.split(" ").filter(Boolean);
-    const filtered = hotels.filter((h) =>
-      keywords.every((kw) => {
-        const priceNum = Number(kw);
-        return (
-          h.name?.toLowerCase().includes(kw) ||
-          h.location?.toLowerCase().includes(kw) ||
-          h.address?.toLowerCase().includes(kw) ||
-          h.amenities?.some((a) => a.toLowerCase().includes(kw)) ||
-          (!isNaN(priceNum) && h.price !== undefined && h.price <= priceNum)
-        );
-      })
-    );
-    setFilteredHotels(filtered);
-  }, [searchTerm, hotels]);
+
+    // Debounced search for non-empty input
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      // Filter based on search keywords (require ALL keywords to match)
+      const term = trimmedInput.toLowerCase();
+      const keywords = term.split(" ").filter(Boolean);
+
+      const filtered = hotels.filter((h) =>
+        // require every keyword to match somewhere on the hotel (AND)
+        keywords.every((kw) => {
+          const priceNum = Number(kw);
+          const isPriceKeyword = !isNaN(priceNum) && priceNum > 0;
+
+          const matchesText =
+            (h.name && h.name.toLowerCase().includes(kw)) ||
+            (h.location && h.location.toLowerCase().includes(kw)) ||
+            (h.address && h.address.toLowerCase().includes(kw)) ||
+            (h.amenities && h.amenities.some((a) => a.toLowerCase().includes(kw)));
+
+          const matchesPrice = isPriceKeyword && h.price !== undefined && h.price <= priceNum;
+
+          return Boolean(matchesText) || matchesPrice;
+        })
+      );
+
+      console.log(`Search term: "${trimmedInput}", Keywords: ${JSON.stringify(keywords)}, Hotels: ${hotels.length}, Filtered: ${filtered.length}`);
+      setFilteredHotels(filtered);
+      setSearchLoading(false);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [inputValue, hotels]);
 
   const handleFavorite = (hotelId: string) => {
     setFavorites((prev) => {
       const updated = prev.includes(hotelId) ? prev.filter((id) => id !== hotelId) : [...prev, hotelId];
       localStorage.setItem("favorites", JSON.stringify(updated));
+      
+      // Also save full hotel info to localStorage for dashboard
+      if (!prev.includes(hotelId)) {
+        // Adding to favorites
+        const hotel = hotels.find(h => h.id === hotelId);
+        if (hotel) {
+          const savedHotels: Hotel[] = JSON.parse(localStorage.getItem("savedHotels") || "[]");
+          const hotelData: Hotel = {
+            id: hotel.id,
+            name: hotel.name,
+            location: hotel.location,
+            address: hotel.address,
+            image: hotel.imageUrl,
+            price: hotel.price,
+            amenities: hotel.amenities || [],
+            description: `${hotel.roomType || "Room"} - Available: ${hotel.availability || 'N/A'}`,
+            latitude: hotel.latitude,
+            longitude: hotel.longitude,
+          };
+          // Avoid duplicates
+          if (!savedHotels.find((h) => h.id === hotel.id)) {
+            savedHotels.push(hotelData);
+            localStorage.setItem("savedHotels", JSON.stringify(savedHotels));
+          }
+        }
+      } else {
+        // Removing from favorites
+        const savedHotels: Hotel[] = JSON.parse(localStorage.getItem("savedHotels") || "[]");
+        const filtered = savedHotels.filter((h) => h.id !== hotelId);
+        localStorage.setItem("savedHotels", JSON.stringify(filtered));
+      }
+      
       return updated;
     });
   };
@@ -244,7 +309,6 @@ export default function HotelsPage() {
         const city = data.address?.city || data.address?.town || data.address?.village || "";
         if (city) {
           setInputValue(city);
-          setSearchTerm(city);
         }
       },
       (err) => console.error(err)
@@ -269,19 +333,19 @@ export default function HotelsPage() {
               placeholder="Search by hotel, amenities, or price..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              className="pr-10 rounded-lg"
+              className="pr-20 rounded-lg"
             />
+            {searchLoading && (
+              <div className="absolute right-10 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            )}
             <button
               onClick={handleUseCurrentLocation}
               title="Use my location"
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 hover:text-blue-800 dark:text-blue-300"
+              className={`absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 hover:text-blue-800 dark:text-blue-300 ${searchLoading ? "pointer-events-none opacity-50" : ""}`}
             >
               📍
             </button>
           </div>
-          <button onClick={handleSearch} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            Search
-          </button>
         </div>
 
         {/* Loading */}
@@ -293,7 +357,7 @@ export default function HotelsPage() {
         )}
 
         {/* Hotel cards */}
-        {filteredHotels.length > 0 && (
+        {filteredHotels.length > 0 ? (
           <motion.div
             className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
             variants={staggerContainer}
@@ -355,9 +419,14 @@ export default function HotelsPage() {
                         </button>
                         <button
                           onClick={() => handleBook(hotel)}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg"
+                          disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
+                          className={`px-4 py-2 rounded-lg text-white font-medium transition ${
+                            hotel.availability === 0 || userBookings.includes(hotel.id)
+                              ? "bg-gray-400 cursor-not-allowed opacity-60"
+                              : "bg-blue-600 hover:bg-blue-700"
+                          }`}
                         >
-                          Book Now
+                          {userBookings.includes(hotel.id) ? "Booked" : hotel.availability === 0 ? "Booked" : "Book Now"}
                         </button>
                       </div>
                     </div>
@@ -366,6 +435,27 @@ export default function HotelsPage() {
               </motion.div>
             ))}
           </motion.div>
+        ) : (
+          // show a helpful message when no results are found
+          !loading && (
+            <div className="text-center py-12">
+              {searchLoading ? (
+                <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+              ) : inputValue.trim() === "" ? (
+                <div>
+                  <p className="text-zinc-600 dark:text-zinc-400 mb-4">No hotels loaded yet.</p>
+                  <button
+                    onClick={() => window.location.reload()}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                  >
+                    Restart Website
+                  </button>
+                </div>
+              ) : (
+                <p className="text-zinc-600 dark:text-zinc-400">No hotels match your search.</p>
+              )}
+            </div>
+          )
         )}
 
         {/* Map Modal */}
@@ -375,7 +465,7 @@ export default function HotelsPage() {
               {/* Close button */}
               <button
                 onClick={handleCloseMap}
-                className="absolute top-2 right-2 z-[999] text-white bg-red-500 rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 text-lg font-bold"
+                className="absolute top-2 right-2 z-999 text-white bg-red-500 rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 text-lg font-bold"
               >
                 ×
               </button>
