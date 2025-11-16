@@ -4,6 +4,7 @@ export interface HotelRoomOffer {
   currency?: string;
   amenities?: string[];
   provider?: string;
+  availability?: number;
 }
 
 interface FetchHotelOffersParams {
@@ -35,11 +36,14 @@ async function getAmadeusToken(): Promise<string | null> {
     });
 
     if (!tokenRes.ok) {
-      console.warn("Amadeus token request failed", tokenRes.status);
+      console.warn(`Amadeus token request failed: ${tokenRes.status} ${tokenRes.statusText}`);
+      const errorText = await tokenRes.text();
+      console.warn("Token error details:", errorText);
       return null;
     }
 
     const tokenData = await tokenRes.json();
+    console.log("✓ Amadeus token obtained successfully");
     return tokenData.access_token || null;
   } catch (err) {
     console.error("Failed to obtain Amadeus token:", err);
@@ -60,23 +64,35 @@ export async function fetchHotelOffers({ lat, lon, checkIn, checkOut }: FetchHot
     params.set("checkInDate", checkIn);
     params.set("checkOutDate", checkOut);
     params.set("bestRateOnly", "true");
-    params.set("currency", "USD");
+    params.set("currency", "PHP");
 
     const url = `https://test.api.amadeus.com/v2/shopping/hotel-offers?${params.toString()}`;
+    console.log(`Fetching Amadeus offers from: ${url}`);
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
-      console.warn("Amadeus hotel-offers request failed", res.status);
+      console.warn(`Amadeus hotel-offers request failed: ${res.status} ${res.statusText}`);
+      const errorText = await res.text();
+      console.warn("Response details:", errorText);
       return [];
     }
 
     const data = await res.json();
-    if (!data || !Array.isArray(data.data)) return [];
+    if (!data || !Array.isArray(data.data)) {
+      console.log("No hotel data returned from Amadeus");
+      return [];
+    }
+
+    console.log(`Amadeus returned ${data.data.length} hotels`);
 
     // Normalize offers: each item in data.data represents a hotel with `offers` array
     const offers: HotelRoomOffer[] = [];
     for (const hotel of data.data) {
       if (!hotel.offers || !Array.isArray(hotel.offers)) continue;
+      
+      // Calculate availability from number of available offers
+      const availability = hotel.offers.length;
+      
       for (const offer of hotel.offers) {
         const roomType = offer.room?.type || offer.room?.description || offer.room?.name || undefined;
         const priceTotal = offer.price?.total ?? offer.price?.value ?? undefined;
@@ -90,9 +106,10 @@ export async function fetchHotelOffers({ lat, lon, checkIn, checkOut }: FetchHot
         offers.push({
           roomType: roomType,
           price: priceTotal !== undefined ? Number(priceTotal) : undefined,
-          currency: currency || "USD",
+          currency: currency || "PHP",
           amenities: amenities.filter(Boolean),
           provider: "amadeus",
+          availability: availability,
         });
       }
     }

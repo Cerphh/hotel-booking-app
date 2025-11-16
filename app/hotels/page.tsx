@@ -385,23 +385,20 @@ export default function HotelsPage() {
                     <p className="text-sm text-zinc-500 mt-1">{hotel.address}</p>
 
                     <div className="flex flex-wrap gap-2 mt-3">
-                      {(hotel.amenities && hotel.amenities.length > 0 ? hotel.amenities.slice(0, 3) : ["No amenities"]).map((a, idx) => (
+                      {(hotel.amenities && hotel.amenities.length > 0 ? hotel.amenities.slice(0, 3) : ["No Amenities"]).map((a, idx) => (
                         <span key={idx} className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-full text-xs">{a}</span>
                       ))}
                     </div>
 
                     <div className="flex flex-wrap gap-2 mt-2">
                       <span className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
-                        {hotel.availability !== undefined ? `Available: ${hotel.availability}` : "Availability N/A"}
-                      </span>
-                      <span className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
-                        {hotel.roomType ?? "Room type N/A"}
+                        {hotel.availability !== undefined && hotel.availability > 0 ? `Available: ${hotel.availability}` : "No Room Available"}
                       </span>
                     </div>
 
                     <div className="mt-auto flex justify-between items-center pt-4">
                       <div className="text-lg font-bold text-left">
-                        {hotel.price !== undefined ? (
+                        {hotel.price && hotel.price > 0 ? (
                           <>
                             ₱{hotel.price.toLocaleString()}{" "}
                             <span className="text-xs text-zinc-500">/{hotel.currency ?? "PHP"}</span>
