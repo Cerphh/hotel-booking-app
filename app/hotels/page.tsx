@@ -17,6 +17,9 @@ import {
   where,
   onSnapshot,
   FirestoreError,
+  doc,
+  getDoc,
+  setDoc,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
 
@@ -24,12 +27,14 @@ let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
   L = require("leaflet");
 
-  delete L.Icon.Default.prototype._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-    iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-    shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  });
+  if (L?.Icon?.Default?.prototype) {
+    delete (L.Icon.Default.prototype as any)._getIconUrl;
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+      shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+    });
+  }
 }
 
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
@@ -57,6 +62,32 @@ const checkOut = (() => {
 })();
 
 const reverseCache = new Map<string, string>();
+let firestorePermissionDenied = false;
+
+// Toggle to disable hotel persistence (useful for dev when Firestore rules
+// block unauthenticated writes). Set `NEXT_PUBLIC_DISABLE_HOTEL_PERSIST=true`
+// in your `.env.local` to skip writes silently.
+const DISABLE_HOTEL_PERSIST = (process.env.NEXT_PUBLIC_DISABLE_HOTEL_PERSIST || "false").toLowerCase() === "true";
+
+async function safeSetDoc(ref: any, data: any, opts?: any) {
+  if (DISABLE_HOTEL_PERSIST) return;
+
+  try {
+    if (opts) {
+      await setDoc(ref, data, opts);
+    } else {
+      await setDoc(ref, data);
+    }
+  } catch (e: any) {
+    const code = e?.code || e?.message || String(e);
+    if (!firestorePermissionDenied && String(code).toLowerCase().includes("permission")) {
+      firestorePermissionDenied = true;
+      console.warn("Firestore write blocked: missing permissions. Persisted mock data will be skipped until rules/auth are updated.");
+    } else if (!String(code).toLowerCase().includes("permission")) {
+      console.warn("Failed to persist hotel mock data", e);
+    }
+  }
+}
 
 async function getExactAddress(lat: number, lon: number, retries = 3): Promise<string> {
   const key = `${lat},${lon}`;
@@ -64,9 +95,7 @@ async function getExactAddress(lat: number, lon: number, retries = 3): Promise<s
 
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`
-      );
+      const res = await fetch(`/api/reverse?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const addr = data.address || {};
@@ -109,6 +138,7 @@ export default function HotelsPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
   const [userBookings, setUserBookings] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<"cards" | "map">("cards");
 
   useEffect(() => setMounted(true), []);
 
@@ -149,45 +179,116 @@ export default function HotelsPage() {
       setLoading(true);
       try {
         const osmHotels = await searchHotelsByCity("Batangas");
+        console.log("fetchHotels: osmHotels returned", Array.isArray(osmHotels) ? osmHotels.length : typeof osmHotels);
         const hotelsToLoad = osmHotels.slice(0, 100);
 
-        hotelsToLoad.forEach(async (osmHotel) => {
-          if (!osmHotel.latitude || !osmHotel.longitude) return;
+        // Build a local array and set state once to avoid race conditions
+        const collected: Hotel[] = [];
 
-          const hotel: Hotel = {
-            ...osmHotel,
-            address: `${osmHotel.latitude}, ${osmHotel.longitude}`, // fallback
-            imageUrl: osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
-          };
+        for (const osmHotel of hotelsToLoad) {
+          if (!osmHotel.latitude || !osmHotel.longitude) continue;
 
-          setHotels((prev) => [...prev, hotel]);
+          const db = getFirestore(app);
+          const hotelDocRef = doc(db, "hotels", String(osmHotel.id));
 
-          getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
-            setHotels((prev) =>
-              prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h))
-            );
-          });
+          try {
+            const snap = await getDoc(hotelDocRef);
 
-          axios
-            .get("/api/hotels", {
-              params: {
-                lat: osmHotel.latitude,
-                lon: osmHotel.longitude,
-                checkIn,
-                checkOut,
-              },
-            })
-            .then((res) => {
-              const offers = res.data;
-              if (offers.length > 0) {
-                const offer = offers[0];
-                setHotels((prev) =>
-                  prev.map((h) => (h.id === hotel.id ? { ...h, ...offer } : h))
-                );
+            let hotel: Hotel;
+
+            if (snap.exists()) {
+              const stored: any = snap.data();
+              hotel = {
+                ...osmHotel,
+                address: stored.address || `${osmHotel.latitude}, ${osmHotel.longitude}`,
+                imageUrl: stored.imageUrl || osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
+                price: stored.price,
+                currency: stored.currency || "PHP",
+                availability: stored.availability,
+                roomType: stored.roomType,
+                amenities: stored.amenities,
+                description: stored.description,
+              };
+
+              if (!stored.address) {
+                // fetch address async but update after initial render
+                getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
+                  setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
+                  safeSetDoc(hotelDocRef, { ...stored, address: addr }, { merge: true });
+                });
               }
-            })
-            .catch(console.warn);
-        });
+            } else {
+              const randomPrice = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000; // 1000-5000
+              const randomAvailability = Math.floor(Math.random() * 11); // 0-10
+              const roomTypes = ["Standard", "Deluxe", "Suite", "Family", "Twin"];
+              const chosenRoom = roomTypes[Math.floor(Math.random() * roomTypes.length)];
+              const image = osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(osmHotel.name)}`;
+
+              const storedData = {
+                id: String(osmHotel.id),
+                name: osmHotel.name,
+                latitude: osmHotel.latitude,
+                longitude: osmHotel.longitude,
+                address: `${osmHotel.latitude}, ${osmHotel.longitude}`,
+                imageUrl: image,
+                price: randomPrice,
+                currency: "PHP",
+                availability: randomAvailability,
+                roomType: chosenRoom,
+                amenities: [],
+                description: `${chosenRoom} - Available: ${randomAvailability}`,
+              } as any;
+
+              await safeSetDoc(hotelDocRef, storedData);
+
+              hotel = {
+                ...osmHotel,
+                address: storedData.address,
+                imageUrl: storedData.imageUrl,
+                price: storedData.price,
+                currency: storedData.currency,
+                availability: storedData.availability,
+                roomType: storedData.roomType,
+                amenities: storedData.amenities,
+                description: storedData.description,
+              };
+
+              // fetch address async and merge
+              getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
+                setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
+                safeSetDoc(hotelDocRef, { address: addr }, { merge: true });
+              });
+            }
+
+            // Try to merge external offers before pushing into collected
+            try {
+              const res = await axios.get("/api/hotels", {
+                params: {
+                  lat: osmHotel.latitude,
+                  lon: osmHotel.longitude,
+                  checkIn,
+                  checkOut,
+                },
+              });
+
+              const offers = res.data as any[];
+              if (Array.isArray(offers) && offers.length > 0) {
+                Object.assign(hotel, offers[0]);
+              }
+            } catch {
+              // ignore
+            }
+
+            collected.push(hotel);
+          } catch (e) {
+            console.warn("Error reading/persisting hotel doc", e);
+          }
+        }
+
+        // set all hotels at once
+        console.log("fetchHotels: collected count", collected.length);
+        setHotels(collected);
+        console.log("fetchHotels: hotels state updated");
       } catch (err) {
         console.error("Failed to fetch hotels", err);
       } finally {
@@ -325,9 +426,9 @@ export default function HotelsPage() {
           <p className="text-zinc-600 dark:text-zinc-400 mb-8">Where Every Stay Feels Right.</p>
         </div>
 
-        {/* Search bar */}
-        <div className="sticky top-16 z-50 bg-zinc-50 dark:bg-black flex gap-2 mb-6 w-1/3 p-0">
-          <div className="relative flex-1">
+        {/* Search bar and View Toggle */}
+        <div className="sticky top-16 z-50 bg-zinc-50 dark:bg-black flex gap-2 mb-6 items-center p-0">
+          <div className="relative flex-1 w-1/3">
             <Input
               type="text"
               placeholder="Search by hotel, amenities, or price..."
@@ -346,6 +447,30 @@ export default function HotelsPage() {
               📍
             </button>
           </div>
+          
+          {/* View Mode Toggle */}
+          <div className="flex gap-2 ml-auto">
+            <button
+              onClick={() => setViewMode("cards")}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                viewMode === "cards"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
+              }`}
+            >
+              📋 Cards
+            </button>
+            <button
+              onClick={() => setViewMode("map")}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                viewMode === "map"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
+              }`}
+            >
+              🗺️ Map
+            </button>
+          </div>
         </div>
 
         {/* Loading */}
@@ -356,82 +481,128 @@ export default function HotelsPage() {
           </div>
         )}
 
-        {/* Hotel cards */}
+        {/* Hotel cards or map */}
         {filteredHotels.length > 0 ? (
-          <motion.div
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-            variants={staggerContainer}
-            initial="initial"
-            animate="animate"
-          >
-            {filteredHotels.map((hotel, i) => (
-              <motion.div key={hotel.id + i} variants={staggerItem}>
-                <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-md overflow-hidden flex flex-col">
-                  <img
-                    src={hotel.imageUrl}
-                    className="h-48 w-full object-cover hover:scale-105 transition-transform"
-                    alt={hotel.name}
-                  />
-                  <div className="p-4 flex flex-col flex-1 relative">
-                    <div className="flex justify-between">
-                      <h3 className="text-lg font-semibold">{hotel.name}</h3>
-                      <button
-                        onClick={() => handleFavorite(hotel.id)}
-                        className={`p-1 rounded-full ${favorites.includes(hotel.id) ? "text-red-500" : "text-gray-400"}`}
-                      >
-                        ♥
-                      </button>
-                    </div>
-                    <p className="text-sm text-zinc-500 mt-1">{hotel.address}</p>
-
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      {(hotel.amenities && hotel.amenities.length > 0 ? hotel.amenities.slice(0, 3) : ["No Amenities"]).map((a, idx) => (
-                        <span key={idx} className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-full text-xs">{a}</span>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      <span className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
-                        {hotel.availability !== undefined && hotel.availability > 0 ? `Available: ${hotel.availability}` : "No Room Available"}
-                      </span>
-                    </div>
-
-                    <div className="mt-auto flex justify-between items-center pt-4">
-                      <div className="text-lg font-bold text-left">
-                        {hotel.price && hotel.price > 0 ? (
-                          <>
-                            ₱{hotel.price.toLocaleString()}{" "}
-                            <span className="text-xs text-zinc-500">/{hotel.currency ?? "PHP"}</span>
-                          </>
-                        ) : (
-                          <span className="text-sm text-gray-400">Php 0.00</span>
-                        )}
+          viewMode === "cards" ? (
+            // Card View
+            <motion.div
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              variants={staggerContainer}
+              initial="initial"
+              animate="animate"
+            >
+              {filteredHotels.map((hotel, i) => (
+                <motion.div key={hotel.id + i} variants={staggerItem}>
+                  <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-md overflow-hidden flex flex-col">
+                    <img
+                      src={hotel.imageUrl}
+                      className="h-48 w-full object-cover hover:scale-105 transition-transform"
+                      alt={hotel.name}
+                    />
+                    <div className="p-4 flex flex-col flex-1 relative">
+                      <div className="flex justify-between">
+                        <h3 className="text-lg font-semibold">{hotel.name}</h3>
+                        <button
+                          onClick={() => handleFavorite(hotel.id)}
+                          className={`p-1 rounded-full ${favorites.includes(hotel.id) ? "text-red-500" : "text-gray-400"}`}
+                        >
+                          ♥
+                        </button>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleViewMap(hotel)}
-                          className="px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-full text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                        >
-                          View Map
-                        </button>
-                        <button
-                          onClick={() => handleBook(hotel)}
-                          disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
-                          className={`px-4 py-2 rounded-lg text-white font-medium transition ${
-                            hotel.availability === 0 || userBookings.includes(hotel.id)
-                              ? "bg-gray-400 cursor-not-allowed opacity-60"
-                              : "bg-blue-600 hover:bg-blue-700"
-                          }`}
-                        >
-                          {userBookings.includes(hotel.id) ? "Booked" : hotel.availability === 0 ? "Booked" : "Book Now"}
-                        </button>
+                      <p className="text-sm text-zinc-500 mt-1">{hotel.address}</p>
+
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {(hotel.amenities && hotel.amenities.length > 0 ? hotel.amenities.slice(0, 3) : ["No Amenities"]).map((a, idx) => (
+                          <span key={idx} className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-full text-xs">{a}</span>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
+                          {hotel.availability !== undefined && hotel.availability > 0 ? `Available: ${hotel.availability}` : "No Room Available"}
+                        </span>
+                      </div>
+
+                      <div className="mt-auto flex justify-between items-center pt-4">
+                        <div className="text-lg font-bold text-left">
+                          {hotel.price && hotel.price > 0 ? (
+                            <>
+                              ₱{hotel.price.toLocaleString()}{" "}
+                              <span className="text-xs text-zinc-500">/{hotel.currency ?? "PHP"}</span>
+                            </>
+                          ) : (
+                            <span className="text-sm text-gray-400">Php 0.00</span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleViewMap(hotel)}
+                            className="px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-full text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+                          >
+                            View Map
+                          </button>
+                          <button
+                            onClick={() => handleBook(hotel)}
+                            disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
+                            className={`px-4 py-2 rounded-lg text-white font-medium transition ${
+                              hotel.availability === 0 || userBookings.includes(hotel.id)
+                                ? "bg-gray-400 cursor-not-allowed opacity-60"
+                                : "bg-blue-600 hover:bg-blue-700"
+                            }`}
+                          >
+                            {userBookings.includes(hotel.id) ? "Booked" : hotel.availability === 0 ? "Booked" : "Book Now"}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+                </motion.div>
+              ))}
+            </motion.div>
+          ) : (
+            // Map View
+            L && (
+              <div className="w-full h-96 rounded-xl overflow-hidden shadow-md">
+                <MapContainer
+                  center={[13.7569, 121.0583]}
+                  zoom={12}
+                  scrollWheelZoom
+                  style={{ width: "100%", height: "100%" }}
+                >
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  />
+                  {filteredHotels.map((hotel) => (
+                    <Marker key={hotel.id} position={[hotel.latitude, hotel.longitude]}>
+                      <Popup>
+                        <div className="text-sm">
+                          <h3 className="font-bold text-base mb-1">{hotel.name}</h3>
+                          <p className="text-xs mb-2">{hotel.address}</p>
+                          {hotel.price && (
+                            <p className="text-xs font-semibold text-blue-600 mb-2">₱{hotel.price.toLocaleString()}</p>
+                          )}
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleBook(hotel)}
+                              disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
+                              className={`px-2 py-1 rounded text-xs font-medium transition ${
+                                hotel.availability === 0 || userBookings.includes(hotel.id)
+                                  ? "bg-gray-400 cursor-not-allowed"
+                                  : "bg-blue-600 text-white hover:bg-blue-700"
+                              }`}
+                            >
+                              Book
+                            </button>
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              </div>
+            )
+          )
         ) : (
           // show a helpful message when no results are found
           !loading && (

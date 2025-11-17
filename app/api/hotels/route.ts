@@ -1,5 +1,3 @@
-import { fetchHotelOffers as fetchAmadeusOffers } from "@/lib/amadeus";
-
 interface HotelData {
   roomType?: string;
   price?: number;
@@ -7,6 +5,16 @@ interface HotelData {
   amenities?: string[];
   availability?: number;
   provider: string;
+}
+
+// Lightweight internal fallback for hotel offers. This removes the hard
+// dependency on the Amadeus client in development unless the user chooses
+// to re-enable it. The function returns an empty array when no external
+// provider is configured.
+async function fetchHotelOffersFallback(_opts: { lat: number; lon: number; checkIn: string; checkOut: string }) {
+  // If you want to enable a real provider later, replace this with a call
+  // to your provider or re-introduce the `lib/amadeus.ts` implementation.
+  return [] as Array<Partial<HotelData>>;
 }
 
 export async function GET(req: Request) {
@@ -25,20 +33,16 @@ export async function GET(req: Request) {
       );
     }
 
-    const amadeusResults = await fetchAmadeusOffers({ lat, lon, checkIn, checkOut });
-    
-    if (amadeusResults.length > 0) {
+    const results = await fetchHotelOffersFallback({ lat, lon, checkIn, checkOut });
+
+    if (results.length > 0) {
       const aggregatedOffer: HotelData = {
-        roomType: amadeusResults[0].roomType || "Standard Room",
-        price: amadeusResults[0].price,
-        currency: amadeusResults[0].currency || "PHP",
-        amenities: Array.from(
-          new Set(
-            amadeusResults.flatMap((offer) => offer.amenities || [])
-          )
-        ),
-        availability: amadeusResults.length,
-        provider: "amadeus",
+        roomType: results[0].roomType || "Standard Room",
+        price: results[0].price,
+        currency: results[0].currency || "PHP",
+        amenities: Array.from(new Set(results.flatMap((o) => o.amenities || []))),
+        availability: results.length,
+        provider: "fallback",
       };
 
       return Response.json([aggregatedOffer]);
@@ -47,9 +51,6 @@ export async function GET(req: Request) {
     return Response.json([]);
   } catch (err) {
     console.error("Hotel API error:", err);
-    return Response.json(
-      { error: "API error", details: String(err) },
-      { status: 500 }
-    );
+    return Response.json({ error: "API error", details: String(err) }, { status: 500 });
   }
 }
