@@ -128,19 +128,19 @@ export default function HotelDetailsPage() {
 
   if (loadingHotel) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[#EFECE3] dark:bg-zinc-950">
+        <div className="h-12 w-12 rounded-full border-4 border-[#4A70A9] border-t-transparent animate-spin"></div>
       </div>
     );
   }
 
   if (!hotel) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center">
-        <p className="text-xl text-gray-600 mb-4">Hotel not found</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#EFECE3] dark:bg-zinc-950">
+        <p className="mb-4 text-xl text-zinc-700 dark:text-zinc-300">Hotel not found</p>
         <button
           onClick={() => router.back()}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+          className="rounded-full bg-[#4A70A9] px-6 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#4A70A9]/90"
         >
           Go Back
         </button>
@@ -149,31 +149,29 @@ export default function HotelDetailsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-black py-8 px-4 sm:px-6 lg:px-8">
-      <motion.div className="max-w-6xl mx-auto" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+    <div className="min-h-screen bg-[#EFECE3] dark:bg-zinc-950 py-8 px-4 sm:px-6 lg:px-8">
+      <motion.div className="mx-auto max-w-6xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
         {/* Back Button */}
         <button
           onClick={() => router.back()}
-          className="mb-6 px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition font-medium"
+          className="mb-6 rounded-full border border-[#8FABD4]/50 bg-white/80 px-4 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:bg-white dark:border-[#8FABD4]/60 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
         >
           ← Back
         </button>
 
-        {/* Hotel Header */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Hotel Image */}
+        <div className="grid gap-8 lg:grid-cols-3">
+          {/* Main content */}
+          <div className="space-y-8 lg:col-span-2">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="rounded-xl overflow-hidden shadow-lg h-96"
+              className="h-96 overflow-hidden rounded-xl shadow-lg"
             >
               <img
                 src={hotel.imageUrl}
                 alt={hotel.name}
-                className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
+                className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
               />
             </motion.div>
 
@@ -182,174 +180,188 @@ export default function HotelDetailsPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-md"
+              className="mt-2 rounded-2xl border border-[#8FABD4]/40 bg-white/95 p-6 shadow-sm dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
             >
-              <h1 className="text-4xl font-bold mb-2">{hotel.name}</h1>
-              <p className="text-gray-600 dark:text-gray-400 text-lg mb-4">{hotel.address}</p>
+          <h1 className="mb-2 text-3xl font-semibold tracking-tight text-[#000000] dark:text-zinc-50">
+            {hotel.name}
+          </h1>
+          <p className="mb-4 text-sm text-zinc-700 dark:text-zinc-400">{hotel.address}</p>
 
-              {/* Availability & Price */}
-              <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Price per Night</p>
-                  <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                    ₱{hotel.price?.toLocaleString() || "N/A"}
-                  </p>
-                </div>
-                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Availability</p>
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {hotel.availability || 0} rooms
-                  </p>
-                </div>
-                <div className="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Status</p>
-                  <p className={`text-2xl font-bold ${isBooked ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
-                    {isBooked ? "Booked" : "Available"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Amenities */}
-              {hotel.amenities && hotel.amenities.length > 0 && (
-                <div>
-                  <h2 className="text-xl font-bold mb-3">Amenities</h2>
-                  <div className="flex flex-wrap gap-2">
-                    {hotel.amenities.map((amenity, idx) => (
-                      <span
-                        key={idx}
-                        className="px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium"
-                      >
-                        {amenity}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </motion.div>
-
-            {/* Map */}
-            {L && hotel.latitude && hotel.longitude && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="rounded-xl overflow-hidden shadow-md h-96"
-              >
-                <MapContainer
-                  center={[hotel.latitude, hotel.longitude]}
-                  zoom={16}
-                  scrollWheelZoom
-                  style={{ width: "100%", height: "100%" }}
-                >
-                  <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  />
-                  <Marker position={[hotel.latitude, hotel.longitude]}>
-                    <Popup>
-                      <div>
-                        <h3 className="font-bold">{hotel.name}</h3>
-                        <p className="text-sm">{hotel.address}</p>
-                      </div>
-                    </Popup>
-                  </Marker>
-                </MapContainer>
-              </motion.div>
-            )}
-
-            {/* Nearby Recommendations */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-md"
-            >
-              <h2 className="text-2xl font-bold mb-4">Nearby Attractions & Dining</h2>
-              {loadingRecommendations ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : recommendations.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {recommendations.map((rec, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg transition"
-                    >
-                      <img
-                        src={rec.imageUrl || "https://via.placeholder.com/400x300"}
-                        alt={rec.name}
-                        className="w-full h-32 object-cover"
-                      />
-                      <div className="p-3">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-bold text-sm flex-1">{rec.name}</h3>
-                          <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs rounded-full ml-2 shrink-0">
-                            {rec.type}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">{rec.description}</p>
-                        <p className="text-xs font-semibold text-gray-500 dark:text-gray-500">📍 {rec.distance}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-gray-600 dark:text-gray-400 text-center py-8">No recommendations available</p>
-              )}
-            </motion.div>
-          </div>
-
-          {/* Sidebar - Booking Summary */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-            className="lg:col-span-1 sticky top-8 h-fit"
-          >
-            <div className="bg-white dark:bg-zinc-900 rounded-xl p-6 shadow-lg space-y-4">
-              <h2 className="text-xl font-bold">Booking Summary</h2>
-
-              <div className="space-y-3 border-b border-gray-200 dark:border-gray-700 pb-4">
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Check In:</span>
-                  <span className="font-medium">{checkIn}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Check Out:</span>
-                  <span className="font-medium">{checkOut}</span>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
-                <div className="flex justify-between mb-2">
-                  <span>Nightly Rate:</span>
-                  <span className="font-bold">₱{hotel.price?.toLocaleString() || 0}</span>
-                </div>
-                <p className="text-xs text-gray-600 dark:text-gray-400 text-right">+₱500 taxes & fees</p>
-              </div>
-
-              <button
-                onClick={() => setIsBookingOpen(true)}
-                disabled={!user || isBooked || hotel.availability === 0}
-                className={`w-full px-4 py-3 rounded-lg font-bold text-white transition ${
-                  !user || isBooked || hotel.availability === 0
-                    ? "bg-gray-400 cursor-not-allowed opacity-60"
-                    : "bg-blue-600 hover:bg-blue-700"
+          {/* Availability & Price */}
+          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-[#8FABD4]/15 p-4">
+              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Price per night</p>
+              <p className="text-2xl font-semibold text-[#4A70A9]">
+                ₱{hotel.price?.toLocaleString() || "N/A"}
+              </p>
+            </div>
+            <div className="rounded-xl bg-[#EFECE3] p-4 dark:bg-zinc-800/80">
+              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Availability</p>
+              <p className="text-2xl font-semibold text-[#000000] dark:text-zinc-50">
+                {hotel.availability || 0} rooms
+              </p>
+            </div>
+            <div className="rounded-xl bg-[#4A70A9]/10 p-4 dark:bg-[#4A70A9]/30">
+              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-200">Status</p>
+              <p
+                className={`text-2xl font-semibold ${
+                  isBooked
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-emerald-600 dark:text-emerald-400"
                 }`}
               >
-                {isBooked ? "✓ Already Booked" : hotel.availability === 0 ? "No Availability" : "Book Now"}
-              </button>
-
-              {!user && (
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-3 text-sm text-yellow-800 dark:text-yellow-200">
-                  ⚠️ Please sign in to book
-                </div>
-              )}
+                {isBooked ? "Booked" : "Available"}
+              </p>
             </div>
+          </div>
+
+          {/* Amenities */}
+          {hotel.amenities && hotel.amenities.length > 0 && (
+            <div>
+              <h2 className="mb-3 text-lg font-semibold text-[#000000] dark:text-zinc-50">Amenities</h2>
+              <div className="flex flex-wrap gap-1.5">
+                {hotel.amenities.map((amenity, idx) => (
+                  <span
+                    key={idx}
+                    className="rounded-full border border-[#8FABD4]/60 bg-[#8FABD4]/15 px-3 py-1 text-xs font-medium text-[#4A70A9] dark:border-[#8FABD4]/70 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]"
+                  >
+                    {amenity}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Map */}
+        {L && hotel.latitude && hotel.longitude && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="h-96 overflow-hidden rounded-xl shadow-md"
+          >
+            <MapContainer
+              center={[hotel.latitude, hotel.longitude]}
+              zoom={16}
+              scrollWheelZoom
+              style={{ width: "100%", height: "100%" }}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              />
+              <Marker position={[hotel.latitude, hotel.longitude]}>
+                <Popup>
+                  <div>
+                    <h3 className="font-bold">{hotel.name}</h3>
+                    <p className="text-sm">{hotel.address}</p>
+                  </div>
+                </Popup>
+              </Marker>
+            </MapContainer>
           </motion.div>
+        )}
+
+        {/* Nearby Recommendations */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="rounded-xl bg-white p-6 shadow-md dark:bg-zinc-900"
+        >
+          <h2 className="mb-4 text-2xl font-semibold text-[#000000] dark:text-zinc-50">
+            Nearby Attractions & Dining
+          </h2>
+          {loadingRecommendations ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#4A70A9] border-t-transparent"></div>
+            </div>
+          ) : recommendations.length > 0 ? (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {recommendations.map((rec, idx) => (
+                <div
+                  key={idx}
+                  className="overflow-hidden rounded-lg border border-[#8FABD4]/40 bg-white/95 shadow-sm transition hover:shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
+                >
+                  <img
+                    src={rec.imageUrl || "https://via.placeholder.com/400x300"}
+                    alt={rec.name}
+                    className="h-32 w-full object-cover"
+                  />
+                  <div className="p-3">
+                    <div className="mb-2 flex items-start justify-between">
+                      <h3 className="flex-1 text-sm font-semibold text-[#000000] dark:text-zinc-50">
+                        {rec.name}
+                      </h3>
+                      <span className="ml-2 shrink-0 rounded-full bg-[#8FABD4]/20 px-2 py-1 text-xs font-medium text-[#4A70A9] dark:bg-[#4A70A9]/30 dark:text-[#EFECE3]">
+                        {rec.type}
+                      </span>
+                    </div>
+                    <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">{rec.description}</p>
+                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">📍 {rec.distance}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
+              No recommendations available
+            </p>
+          )}
+        </motion.div>
+      </div>
+
+      {/* Sidebar - Booking Summary */}
+      <motion.div
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.2 }}
+        className="sticky top-8 h-fit rounded-2xl border border-[#8FABD4]/40 bg-white/95 p-6 shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
+      >
+        <h2 className="text-xl font-semibold text-[#000000] dark:text-zinc-50">Booking Summary</h2>
+
+        <div className="mt-4 space-y-3 border-b border-zinc-200 pb-4 dark:border-zinc-700">
+          <div className="flex justify-between text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Check In:</span>
+            <span className="font-medium text-[#000000] dark:text-zinc-50">{checkIn}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-zinc-600 dark:text-zinc-400">Check Out:</span>
+            <span className="font-medium text-[#000000] dark:text-zinc-50">{checkOut}</span>
+          </div>
         </div>
+
+        <div className="mt-4 rounded-xl bg-[#8FABD4]/10 p-4 dark:bg-[#4A70A9]/20">
+          <div className="mb-2 flex justify-between text-sm">
+            <span className="text-zinc-700 dark:text-zinc-200">Nightly Rate:</span>
+            <span className="font-semibold text-[#000000] dark:text-zinc-50">
+              ₱{hotel.price?.toLocaleString() || 0}
+            </span>
+          </div>
+          <p className="text-right text-xs text-zinc-600 dark:text-zinc-400">+₱500 taxes & fees</p>
+        </div>
+
+        <button
+          onClick={() => setIsBookingOpen(true)}
+          disabled={!user || isBooked || hotel.availability === 0}
+          className={`mt-4 w-full rounded-full px-4 py-3 text-sm font-semibold text-white shadow-sm transition ${
+            !user || isBooked || hotel.availability === 0
+              ? "cursor-not-allowed bg-zinc-400/70 opacity-70"
+              : "bg-[#4A70A9] hover:bg-[#4A70A9]/90"
+          }`}
+        >
+          {isBooked ? "✓ Already Booked" : hotel.availability === 0 ? "No Availability" : "Book Now"}
+        </button>
+
+        {!user && (
+          <div className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+            ⚠️ Please sign in to book
+          </div>
+        )}
       </motion.div>
+    </div>
+  </motion.div>
 
       {/* Booking Modal */}
       <BookingModal
@@ -359,6 +371,10 @@ export default function HotelDetailsPage() {
         isOpen={isBookingOpen}
         onClose={() => setIsBookingOpen(false)}
         onBook={() => setIsBooked(true)}
+        onChangeDates={({ checkIn, checkOut }) => {
+          setCheckIn(checkIn);
+          setCheckOut(checkOut);
+        }}
       />
     </div>
   );

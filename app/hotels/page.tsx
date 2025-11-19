@@ -2,6 +2,9 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { redirect } from "next/navigation";
@@ -182,113 +185,119 @@ export default function HotelsPage() {
         console.log("fetchHotels: osmHotels returned", Array.isArray(osmHotels) ? osmHotels.length : typeof osmHotels);
         const hotelsToLoad = osmHotels.slice(0, 100);
 
-        // Build a local array and set state once to avoid race conditions
+        // Build hotels in batches and update UI incrementally so users see results quickly.
         const collected: Hotel[] = [];
+        // Show hotels in smaller batches so the UI can render progressively.
+        const BATCH_SIZE = 100;
 
-        for (const osmHotel of hotelsToLoad) {
-          if (!osmHotel.latitude || !osmHotel.longitude) continue;
+        for (let i = 0; i < hotelsToLoad.length; i += BATCH_SIZE) {
+          const batch = hotelsToLoad.slice(i, i + BATCH_SIZE);
 
-          const db = getFirestore(app);
-          const hotelDocRef = doc(db, "hotels", String(osmHotel.id));
+          const batchResults = await Promise.all(
+            batch.map(async (osmHotel) => {
+              if (!osmHotel.latitude || !osmHotel.longitude) return null;
 
-          try {
-            const snap = await getDoc(hotelDocRef);
+              const db = getFirestore(app);
+              const hotelDocRef = doc(db, "hotels", String(osmHotel.id));
 
-            let hotel: Hotel;
+              try {
+                const snap = await getDoc(hotelDocRef);
+                let hotel: Hotel;
 
-            if (snap.exists()) {
-              const stored: any = snap.data();
-              hotel = {
-                ...osmHotel,
-                address: stored.address || `${osmHotel.latitude}, ${osmHotel.longitude}`,
-                imageUrl: stored.imageUrl || osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
-                price: stored.price,
-                currency: stored.currency || "PHP",
-                availability: stored.availability,
-                roomType: stored.roomType,
-                amenities: stored.amenities,
-                description: stored.description,
-              };
+                if (snap.exists()) {
+                  const stored: any = snap.data();
+                  hotel = {
+                    ...osmHotel,
+                    address: stored.address || `${osmHotel.latitude}, ${osmHotel.longitude}`,
+                    imageUrl: stored.imageUrl || osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
+                    price: stored.price,
+                    currency: stored.currency || "PHP",
+                    availability: stored.availability,
+                    roomType: stored.roomType,
+                    amenities: stored.amenities,
+                    description: stored.description,
+                  };
 
-              if (!stored.address) {
-                // fetch address async but update after initial render
-                getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
-                  setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
-                  safeSetDoc(hotelDocRef, { ...stored, address: addr }, { merge: true });
-                });
+                  if (!stored.address) {
+                    getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
+                      setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
+                      safeSetDoc(hotelDocRef, { ...stored, address: addr }, { merge: true });
+                    });
+                  }
+                } else {
+                  const randomPrice = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
+                  const randomAvailability = Math.floor(Math.random() * 11);
+                  const roomTypes = ["Standard", "Deluxe", "Suite", "Family", "Twin"];
+                  const chosenRoom = roomTypes[Math.floor(Math.random() * roomTypes.length)];
+                  const image = osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(osmHotel.name)}`;
+
+                  const storedData = {
+                    id: String(osmHotel.id),
+                    name: osmHotel.name,
+                    latitude: osmHotel.latitude,
+                    longitude: osmHotel.longitude,
+                    address: `${osmHotel.latitude}, ${osmHotel.longitude}`,
+                    imageUrl: image,
+                    price: randomPrice,
+                    currency: "PHP",
+                    availability: randomAvailability,
+                    roomType: chosenRoom,
+                    amenities: [],
+                    description: `${chosenRoom} - Available: ${randomAvailability}`,
+                  } as any;
+
+                  await safeSetDoc(hotelDocRef, storedData);
+
+                  hotel = {
+                    ...osmHotel,
+                    address: storedData.address,
+                    imageUrl: storedData.imageUrl,
+                    price: storedData.price,
+                    currency: storedData.currency,
+                    availability: storedData.availability,
+                    roomType: storedData.roomType,
+                    amenities: storedData.amenities,
+                    description: storedData.description,
+                  };
+
+                  getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
+                    setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
+                    safeSetDoc(hotelDocRef, { address: addr }, { merge: true });
+                  });
+                }
+
+                try {
+                  const res = await axios.get("/api/hotels", {
+                    params: { lat: osmHotel.latitude, lon: osmHotel.longitude, checkIn, checkOut },
+                  });
+
+                  const offers = res.data as any[];
+                  if (Array.isArray(offers) && offers.length > 0) {
+                    Object.assign(hotel, offers[0]);
+                  }
+                } catch {
+                  // ignore
+                }
+
+                return hotel;
+              } catch (e) {
+                console.warn("Error reading/persisting hotel doc", e);
+                return null;
               }
-            } else {
-              const randomPrice = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000; // 1000-5000
-              const randomAvailability = Math.floor(Math.random() * 11); // 0-10
-              const roomTypes = ["Standard", "Deluxe", "Suite", "Family", "Twin"];
-              const chosenRoom = roomTypes[Math.floor(Math.random() * roomTypes.length)];
-              const image = osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(osmHotel.name)}`;
+            })
+          );
 
-              const storedData = {
-                id: String(osmHotel.id),
-                name: osmHotel.name,
-                latitude: osmHotel.latitude,
-                longitude: osmHotel.longitude,
-                address: `${osmHotel.latitude}, ${osmHotel.longitude}`,
-                imageUrl: image,
-                price: randomPrice,
-                currency: "PHP",
-                availability: randomAvailability,
-                roomType: chosenRoom,
-                amenities: [],
-                description: `${chosenRoom} - Available: ${randomAvailability}`,
-              } as any;
-
-              await safeSetDoc(hotelDocRef, storedData);
-
-              hotel = {
-                ...osmHotel,
-                address: storedData.address,
-                imageUrl: storedData.imageUrl,
-                price: storedData.price,
-                currency: storedData.currency,
-                availability: storedData.availability,
-                roomType: storedData.roomType,
-                amenities: storedData.amenities,
-                description: storedData.description,
-              };
-
-              // fetch address async and merge
-              getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
-                setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
-                safeSetDoc(hotelDocRef, { address: addr }, { merge: true });
-              });
-            }
-
-            // Try to merge external offers before pushing into collected
-            try {
-              const res = await axios.get("/api/hotels", {
-                params: {
-                  lat: osmHotel.latitude,
-                  lon: osmHotel.longitude,
-                  checkIn,
-                  checkOut,
-                },
-              });
-
-              const offers = res.data as any[];
-              if (Array.isArray(offers) && offers.length > 0) {
-                Object.assign(hotel, offers[0]);
-              }
-            } catch {
-              // ignore
-            }
-
-            collected.push(hotel);
-          } catch (e) {
-            console.warn("Error reading/persisting hotel doc", e);
+          const added = batchResults.filter(Boolean) as Hotel[];
+          if (added.length > 0) {
+            collected.push(...added);
+            setHotels((prev) => [...prev, ...added]);
+            console.log(`Processed batch ${i / BATCH_SIZE + 1}: added ${added.length}, total loaded ${collected.length}`);
           }
+
+          // batch done
         }
 
-        // set all hotels at once
         console.log("fetchHotels: collected count", collected.length);
-        setHotels(collected);
-        console.log("fetchHotels: hotels state updated");
       } catch (err) {
         console.error("Failed to fetch hotels", err);
       } finally {
@@ -299,11 +308,9 @@ export default function HotelsPage() {
     fetchHotels();
   }, [mounted]);
 
-
-
   // Update filtered hotels whenever input or hotels change
   useEffect(() => {
-    const trimmedInput = inputValue.trim();
+    const trimmedInput = inputValue.trim().toLowerCase();
 
     // If input is empty, show all hotels
     if (trimmedInput === "") {
@@ -312,37 +319,23 @@ export default function HotelsPage() {
       return;
     }
 
-    // Debounced search for non-empty input
     setSearchLoading(true);
-    const timer = setTimeout(() => {
-      // Filter based on search keywords (require ALL keywords to match)
-      const term = trimmedInput.toLowerCase();
-      const keywords = term.split(" ").filter(Boolean);
 
-      const filtered = hotels.filter((h) =>
-        // require every keyword to match somewhere on the hotel (AND)
-        keywords.every((kw) => {
-          const priceNum = Number(kw);
-          const isPriceKeyword = !isNaN(priceNum) && priceNum > 0;
+    // Prefix match on hotel name; fall back to address/location contains
+    const filtered = hotels.filter((h) => {
+      const name = (h.name || "").toLowerCase();
+      const address = (h.address || "").toLowerCase();
+      const location = (h.location || "").toLowerCase();
 
-          const matchesText =
-            (h.name && h.name.toLowerCase().includes(kw)) ||
-            (h.location && h.location.toLowerCase().includes(kw)) ||
-            (h.address && h.address.toLowerCase().includes(kw)) ||
-            (h.amenities && h.amenities.some((a) => a.toLowerCase().includes(kw)));
+      const matchesNamePrefix = name.startsWith(trimmedInput);
+      const matchesAddress = address.includes(trimmedInput);
+      const matchesLocation = location.includes(trimmedInput);
 
-          const matchesPrice = isPriceKeyword && h.price !== undefined && h.price <= priceNum;
+      return matchesNamePrefix || matchesAddress || matchesLocation;
+    });
 
-          return Boolean(matchesText) || matchesPrice;
-        })
-      );
-
-      console.log(`Search term: "${trimmedInput}", Keywords: ${JSON.stringify(keywords)}, Hotels: ${hotels.length}, Filtered: ${filtered.length}`);
-      setFilteredHotels(filtered);
-      setSearchLoading(false);
-    }, 300);
-
-    return () => clearTimeout(timer);
+    setFilteredHotels(filtered);
+    setSearchLoading(false);
   }, [inputValue, hotels]);
 
   const handleFavorite = (hotelId: string) => {
@@ -419,30 +412,50 @@ export default function HotelsPage() {
   if (!mounted) return null;
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-black py-12 px-4 sm:px-6 lg:px-8">
-      <motion.div className="max-w-6xl mx-auto">
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold text-black dark:text-white mb-2">Explore Batangas!</h1>
-          <p className="text-zinc-600 dark:text-zinc-400 mb-8">Where Every Stay Feels Right.</p>
+    <div className="min-h-screen bg-[#EFECE3] dark:bg-zinc-950 py-12 px-4 sm:px-6 lg:px-8">
+      <motion.div className="mx-auto flex max-w-6xl flex-col gap-6">
+        {/* Hero */}
+        <div className="flex flex-col justify-between gap-4 rounded-3xl border border-[#8FABD4]/40 bg-white/85 px-5 py-6 shadow-sm backdrop-blur dark:bg-zinc-900/90 md:flex-row md:items-center">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#4A70A9] dark:text-[#8FABD4]">Find your stay</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#000000] dark:text-zinc-50 md:text-4xl">
+              Explore Batangas hotels
+            </h1>
+            <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-400">
+              Browse handpicked stays across Batangas with real-time availability and easy booking.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+            <div className="flex items-center gap-2">
+              <Badge className="border-[#8FABD4]/50 bg-[#8FABD4]/15 text-[11px] text-[#4A70A9] dark:border-[#8FABD4]/60 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]">Flexible dates</Badge>
+              <Badge
+                variant="outline"
+                className="border-[#8FABD4]/50 text-[11px] text-[#4A70A9] dark:border-[#8FABD4]/70 dark:text-[#EFECE3]"
+              >
+                No booking fees
+              </Badge>
+            </div>
+            <p>Check-in: {checkIn} · Check-out: {checkOut}</p>
+          </div>
         </div>
 
         {/* Search bar and View Toggle */}
-        <div className="sticky top-16 z-50 bg-zinc-50 dark:bg-black flex gap-2 mb-6 items-center p-0">
+        <div className="sticky top-16 z-40 flex items-center gap-3 rounded-2xl border border-[#8FABD4]/40 bg-[#EFECE3]/95 px-4 py-3 shadow-sm backdrop-blur dark:bg-zinc-900/95">
           <div className="relative flex-1 w-1/3">
             <Input
               type="text"
               placeholder="Search by hotel, amenities, or price..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              className="pr-20 rounded-lg"
+              className="rounded-full border-[#8FABD4]/50 bg-white/90 pr-20 text-sm dark:border-[#8FABD4]/60 dark:bg-zinc-900 dark:text-zinc-50"
             />
             {searchLoading && (
-              <div className="absolute right-10 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              <div className="absolute right-10 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border-2 border-[#4A70A9] border-t-transparent animate-spin dark:border-[#8FABD4]"></div>
             )}
             <button
               onClick={handleUseCurrentLocation}
               title="Use my location"
-              className={`absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 hover:text-blue-800 dark:text-blue-300 ${searchLoading ? "pointer-events-none opacity-50" : ""}`}
+              className={`absolute right-2 top-1/2 -translate-y-1/2 text-[#4A70A9] hover:text-[#000000] dark:text-[#8FABD4] ${searchLoading ? "pointer-events-none opacity-50" : ""}`}
             >
               📍
             </button>
@@ -450,34 +463,32 @@ export default function HotelsPage() {
           
           {/* View Mode Toggle */}
           <div className="flex gap-2 ml-auto">
-            <button
+            <Button
               onClick={() => setViewMode("cards")}
-              className={`px-4 py-2 rounded-lg font-medium transition ${
-                viewMode === "cards"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
-              }`}
+              variant={viewMode === "cards" ? "default" : "outline"}
+              className={viewMode === "cards"
+                ? "rounded-full bg-[#4A70A9] px-4 py-2 text-xs font-medium text-white hover:bg-[#4A70A9]/90 dark:bg-[#8FABD4] dark:hover:bg-[#8FABD4]/90"
+                : "rounded-full border-[#8FABD4]/60 bg-white/70 px-4 py-2 text-xs font-medium text-zinc-800 hover:bg-white dark:border-[#8FABD4]/70 dark:bg-zinc-900 dark:text-zinc-100"}
             >
               📋 Cards
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => setViewMode("map")}
-              className={`px-4 py-2 rounded-lg font-medium transition ${
-                viewMode === "map"
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white hover:bg-gray-300 dark:hover:bg-gray-600"
-              }`}
+              variant={viewMode === "map" ? "default" : "outline"}
+              className={viewMode === "map"
+                ? "rounded-full bg-[#4A70A9] px-4 py-2 text-xs font-medium text-white hover:bg-[#4A70A9]/90 dark:bg-[#8FABD4] dark:hover:bg-[#8FABD4]/90"
+                : "rounded-full border-[#8FABD4]/60 bg-white/70 px-4 py-2 text-xs font-medium text-zinc-800 hover:bg-white dark:border-[#8FABD4]/70 dark:bg-zinc-900 dark:text-zinc-100"}
             >
               🗺️ Map
-            </button>
+            </Button>
           </div>
         </div>
 
         {/* Loading */}
         {hotels.length === 0 && loading && (
           <div className="flex flex-col items-center py-20">
-            <div className="w-12 h-12 border-4 border-blue-500 border-dashed rounded-full animate-spin"></div>
-            <p className="mt-4 text-blue-600">Loading hotels...</p>
+            <div className="h-12 w-12 rounded-full border-4 border-[#4A70A9] border-dashed animate-spin dark:border-[#8FABD4]"></div>
+            <p className="mt-4 text-sm font-medium text-[#4A70A9] dark:text-[#8FABD4]">Loading hotels...</p>
           </div>
         )}
 
@@ -493,71 +504,106 @@ export default function HotelsPage() {
             >
               {filteredHotels.map((hotel, i) => (
                 <motion.div key={hotel.id + i} variants={staggerItem}>
-                  <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-md overflow-hidden flex flex-col">
-                    <img
-                      src={hotel.imageUrl}
-                      className="h-48 w-full object-cover hover:scale-105 transition-transform"
-                      alt={hotel.name}
-                    />
-                    <div className="p-4 flex flex-col flex-1 relative">
-                      <div className="flex justify-between">
-                        <h3 className="text-lg font-semibold">{hotel.name}</h3>
-                        <button
-                          onClick={() => handleFavorite(hotel.id)}
-                          className={`p-1 rounded-full ${favorites.includes(hotel.id) ? "text-red-500" : "text-gray-400"}`}
-                        >
-                          ♥
-                        </button>
-                      </div>
-                      <p className="text-sm text-zinc-500 mt-1">{hotel.address}</p>
+                  <Card className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#8FABD4]/40 bg-white/95 shadow-[0_18px_45px_rgba(15,23,42,0.12)] dark:border-[#8FABD4]/40 dark:bg-zinc-900">
+                    <div className="relative h-44 w-full overflow-hidden bg-muted dark:bg-zinc-800">
+                      <img
+                        src={hotel.imageUrl}
+                        className="h-full w-full object-cover transition duration-500 hover:scale-105"
+                        alt={hotel.name}
+                      />
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={() => handleFavorite(hotel.id)}
+                        className="absolute right-3 top-3 h-8 w-8 rounded-full bg-white/80 text-[#4A70A9] shadow-sm hover:bg-white dark:bg-zinc-900/80 dark:text-[#EFECE3] dark:hover:bg-zinc-900"
+                      >
+                        <span className={favorites.includes(hotel.id) ? "text-lg" : "text-lg opacity-60"}>♥</span>
+                      </Button>
+                      {typeof hotel.price === "number" && hotel.price > 0 && (
+                        <div className="pointer-events-none absolute inset-x-3 bottom-3 flex gap-2 text-[11px] font-medium">
+                          <span className="inline-flex items-baseline rounded-full bg-black/75 px-3 py-1 text-[#EFECE3] shadow-md dark:bg-black/70">
+                            <span className="mr-1 text-[10px] uppercase tracking-wide opacity-80">from</span>
+                            <span className="text-sm">₱{hotel.price.toLocaleString()}</span>
+                            <span className="ml-1 text-[10px] opacity-80">/night</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
 
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {(hotel.amenities && hotel.amenities.length > 0 ? hotel.amenities.slice(0, 3) : ["No Amenities"]).map((a, idx) => (
-                          <span key={idx} className="px-3 py-1 bg-blue-100 dark:bg-blue-900 rounded-full text-xs">{a}</span>
+                    <CardContent className="flex flex-1 flex-col gap-2 p-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-[#000000] dark:text-zinc-50">
+                          {hotel.name}
+                        </h3>
+                        <p className="mt-1 line-clamp-1 text-xs text-zinc-600 dark:text-zinc-400">
+                          {hotel.address}
+                        </p>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(hotel.amenities && hotel.amenities.length > 0
+                          ? hotel.amenities.slice(0, 3)
+                          : ["No amenities listed"]
+                        ).map((a, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="outline"
+                            className="border-[#8FABD4]/60 bg-[#8FABD4]/15 px-2 py-0 text-[11px] font-normal text-[#4A70A9] dark:border-[#8FABD4]/70 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]"
+                          >
+                            {a}
+                          </Badge>
                         ))}
+                        {hotel.availability !== undefined && hotel.availability > 0 && (
+                          <Badge className="bg-[#4A70A9]/10 px-2 py-0 text-[11px] text-[#4A70A9] dark:bg-[#4A70A9]/30 dark:text-[#EFECE3]">
+                            {hotel.availability} rooms left
+                          </Badge>
+                        )}
                       </div>
 
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        <span className="px-3 py-1 bg-gray-200 dark:bg-gray-700 rounded-full text-xs">
-                          {hotel.availability !== undefined && hotel.availability > 0 ? `Available: ${hotel.availability}` : "No Room Available"}
-                        </span>
-                      </div>
-
-                      <div className="mt-auto flex justify-between items-center pt-4">
-                        <div className="text-lg font-bold text-left">
+                      <div className="mt-auto flex items-end justify-between pt-3">
+                        <div className="text-left text-xs text-zinc-600 dark:text-zinc-300">
                           {hotel.price && hotel.price > 0 ? (
                             <>
-                              ₱{hotel.price.toLocaleString()}{" "}
-                              <span className="text-xs text-zinc-500">/{hotel.currency ?? "PHP"}</span>
+                              <div className="text-[13px] font-semibold text-[#000000] dark:text-zinc-50">
+                                From <span className="text-base">₱{hotel.price.toLocaleString()}</span>
+                              </div>
+                              <div className="text-[11px] text-[#4A70A9] dark:text-[#8FABD4]">
+                                Includes taxes and charges
+                              </div>
                             </>
                           ) : (
-                            <span className="text-sm text-gray-400">Php 0.00</span>
+                            <span className="text-[11px] italic">Contact property for pricing</span>
                           )}
                         </div>
+
                         <div className="flex gap-2">
-                          <button
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full border-[#8FABD4]/60 text-xs dark:border-[#8FABD4]/70 dark:text-zinc-100"
                             onClick={() => handleViewMap(hotel)}
-                            className="px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-full text-xs font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition"
                           >
-                            View Map
-                          </button>
-                          <button
-                            onClick={() => handleBook(hotel)}
+                            Map
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="rounded-full bg-[#4A70A9] px-4 text-xs font-medium text-white hover:bg-[#4A70A9]/90 dark:bg-[#8FABD4] dark:text-zinc-950 dark:hover:bg-[#8FABD4]/90"
                             disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
-                            className={`px-4 py-2 rounded-lg text-white font-medium transition ${
-                              hotel.availability === 0 || userBookings.includes(hotel.id)
-                                ? "bg-gray-400 cursor-not-allowed opacity-60"
-                                : "bg-blue-600 hover:bg-blue-700"
-                            }`}
+                            onClick={() => handleBook(hotel)}
                           >
-                            {userBookings.includes(hotel.id) ? "Booked" : hotel.availability === 0 ? "Booked" : "Book Now"}
-                          </button>
+                            {userBookings.includes(hotel.id)
+                              ? "Booked"
+                              : hotel.availability === 0
+                              ? "Fully booked"
+                              : "Book now"}
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 </motion.div>
               ))}
+              
             </motion.div>
           ) : (
             // Map View
