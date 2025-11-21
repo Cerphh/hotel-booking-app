@@ -9,8 +9,6 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { redirect } from "next/navigation";
 import { staggerContainer, staggerItem } from "@/lib/animations";
-import { searchHotelsByCity, Hotel as OSMHotel } from "@/lib/osm-hotels";
-import axios from "axios";
 import dynamic from "next/dynamic";
 import { useMap } from "react-leaflet";
 import {
@@ -23,6 +21,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  DocumentData,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
 
@@ -45,7 +44,11 @@ const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLa
 const Marker = dynamic(() => import("react-leaflet").then((mod) => mod.Marker), { ssr: false });
 const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), { ssr: false });
 
-interface Hotel extends OSMHotel {
+interface Hotel {
+  id: string;
+  name?: string;
+  latitude?: number;
+  longitude?: number;
   price?: number;
   currency?: string;
   roomType?: string;
@@ -55,6 +58,8 @@ interface Hotel extends OSMHotel {
   address?: string;
   image?: string;
   description?: string;
+  // any extra fields
+  [k: string]: any;
 }
 
 const checkIn = new Date().toISOString().split("T")[0];
@@ -87,7 +92,7 @@ async function safeSetDoc(ref: any, data: any, opts?: any) {
       firestorePermissionDenied = true;
       console.warn("Firestore write blocked: missing permissions. Persisted mock data will be skipped until rules/auth are updated.");
     } else if (!String(code).toLowerCase().includes("permission")) {
-      console.warn("Failed to persist hotel mock data", e);
+      console.warn("Failed to persist hotel data", e);
     }
   }
 }
@@ -123,7 +128,7 @@ async function getExactAddress(lat: number, lon: number, retries = 3): Promise<s
 function AutoFitMap({ hotel }: { hotel: Hotel }) {
   const map = useMap();
   useEffect(() => {
-    if (hotel && map) {
+    if (hotel && map && hotel.latitude && hotel.longitude) {
       map.setView([hotel.latitude, hotel.longitude], 16);
     }
   }, [hotel, map]);
@@ -164,7 +169,10 @@ export default function HotelsPage() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const bookedHotelIds = snapshot.docs.map((doc) => doc.data().hotelId || doc.data().id);
+        const bookedHotelIds = snapshot.docs.map((doc) => {
+          const d = doc.data() as DocumentData;
+          return d.hotelId || d.id;
+        });
         setUserBookings(bookedHotelIds);
       },
       (error: FirestoreError) => {
@@ -175,137 +183,82 @@ export default function HotelsPage() {
     return () => unsubscribe();
   }, [mounted, user?.email]);
 
+  // Load hotels from Firestore (real-time)
   useEffect(() => {
     if (!mounted) return;
+    setLoading(true);
 
-    const fetchHotels = async () => {
-      setLoading(true);
-      try {
-        const osmHotels = await searchHotelsByCity("Batangas");
-        console.log("fetchHotels: osmHotels returned", Array.isArray(osmHotels) ? osmHotels.length : typeof osmHotels);
-        const hotelsToLoad = osmHotels.slice(0, 100);
+    const db = getFirestore(app);
+    const q = collection(db, "hotels");
 
-        // Build hotels in batches and update UI incrementally so users see results quickly.
-        const collected: Hotel[] = [];
-        // Show hotels in smaller batches so the UI can render progressively.
-        const BATCH_SIZE = 100;
+    const unsubscribe = onSnapshot(
+      q,
+      async (snapshot) => {
+        const list: Hotel[] = [];
+        const missingAddressPromises: Promise<void>[] = [];
 
-        for (let i = 0; i < hotelsToLoad.length; i += BATCH_SIZE) {
-          const batch = hotelsToLoad.slice(i, i + BATCH_SIZE);
+        snapshot.docs.forEach((d) => {
+          const data = d.data() as DocumentData;
+          const hotel: Hotel = {
+            id: String(data.id ?? d.id),
+            name: data.name ?? data.title ?? "",
+            latitude: typeof data.latitude === "number" ? data.latitude : parseFloat(String(data.latitude || "")) || undefined,
+            longitude: typeof data.longitude === "number" ? data.longitude : parseFloat(String(data.longitude || "")) || undefined,
+            address: data.address ?? "",
+            imageUrl: data.imageUrl ?? data.image ?? `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(String(data.name ?? ""))}`,
+            price: typeof data.price === "number" ? data.price : data.price ? Number(data.price) : undefined,
+            currency: data.currency ?? "PHP",
+            availability: typeof data.availability === "number" ? data.availability : data.availability ? Number(data.availability) : undefined,
+            roomType: data.roomType ?? data.room_type ?? "",
+            amenities: Array.isArray(data.amenities) ? data.amenities : (data.amenities ? String(data.amenities).split(",").map((s: string) => s.trim()) : []),
+            description: data.description ?? "",
+            ...data,
+          };
 
-          const batchResults = await Promise.all(
-            batch.map(async (osmHotel) => {
-              if (!osmHotel.latitude || !osmHotel.longitude) return null;
-
-              const db = getFirestore(app);
-              const hotelDocRef = doc(db, "hotels", String(osmHotel.id));
-
-              try {
-                const snap = await getDoc(hotelDocRef);
-                let hotel: Hotel;
-
-                if (snap.exists()) {
-                  const stored: any = snap.data();
-                  hotel = {
-                    ...osmHotel,
-                    address: stored.address || `${osmHotel.latitude}, ${osmHotel.longitude}`,
-                    imageUrl: stored.imageUrl || osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel`,
-                    price: stored.price,
-                    currency: stored.currency || "PHP",
-                    availability: stored.availability,
-                    roomType: stored.roomType,
-                    amenities: stored.amenities,
-                    description: stored.description,
-                  };
-
-                  if (!stored.address) {
-                    getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
-                      setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
-                      safeSetDoc(hotelDocRef, { ...stored, address: addr }, { merge: true });
-                    });
-                  }
-                } else {
-                  const randomPrice = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-                  const randomAvailability = Math.floor(Math.random() * 11);
-                  const roomTypes = ["Standard", "Deluxe", "Suite", "Family", "Twin"];
-                  const chosenRoom = roomTypes[Math.floor(Math.random() * roomTypes.length)];
-                  const image = osmHotel.imageUrl || `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(osmHotel.name)}`;
-
-                  const storedData = {
-                    id: String(osmHotel.id),
-                    name: osmHotel.name,
-                    latitude: osmHotel.latitude,
-                    longitude: osmHotel.longitude,
-                    address: `${osmHotel.latitude}, ${osmHotel.longitude}`,
-                    imageUrl: image,
-                    price: randomPrice,
-                    currency: "PHP",
-                    availability: randomAvailability,
-                    roomType: chosenRoom,
-                    amenities: [],
-                    description: `${chosenRoom} - Available: ${randomAvailability}`,
-                  } as any;
-
-                  await safeSetDoc(hotelDocRef, storedData);
-
-                  hotel = {
-                    ...osmHotel,
-                    address: storedData.address,
-                    imageUrl: storedData.imageUrl,
-                    price: storedData.price,
-                    currency: storedData.currency,
-                    availability: storedData.availability,
-                    roomType: storedData.roomType,
-                    amenities: storedData.amenities,
-                    description: storedData.description,
-                  };
-
-                  getExactAddress(osmHotel.latitude, osmHotel.longitude).then((addr) => {
-                    setHotels((prev) => prev.map((h) => (h.id === hotel.id ? { ...h, address: addr } : h)));
-                    safeSetDoc(hotelDocRef, { address: addr }, { merge: true });
-                  });
-                }
-
+          // If address missing but coords exist, queue reverse geocode and merge back to Firestore (best-effort)
+          if ((!hotel.address || hotel.address.trim() === "") && hotel.latitude && hotel.longitude) {
+            missingAddressPromises.push(
+              (async () => {
                 try {
-                  const res = await axios.get("/api/hotels", {
-                    params: { lat: osmHotel.latitude, lon: osmHotel.longitude, checkIn, checkOut },
-                  });
-
-                  const offers = res.data as any[];
-                  if (Array.isArray(offers) && offers.length > 0) {
-                    Object.assign(hotel, offers[0]);
-                  }
-                } catch {
-                  // ignore
+                  const addr = await getExactAddress(hotel.latitude!, hotel.longitude!);
+                  hotel.address = addr;
+                  // Save back to Firestore (merge) if allowed
+                  const docRef = doc(db, "hotels", String(hotel.id));
+                  await safeSetDoc(docRef, { address: addr }, { merge: true });
+                } catch (err) {
+                  // ignore; we already have fallback address
                 }
-
-                return hotel;
-              } catch (e) {
-                console.warn("Error reading/persisting hotel doc", e);
-                return null;
-              }
-            })
-          );
-
-          const added = batchResults.filter(Boolean) as Hotel[];
-          if (added.length > 0) {
-            collected.push(...added);
-            setHotels((prev) => [...prev, ...added]);
-            console.log(`Processed batch ${i / BATCH_SIZE + 1}: added ${added.length}, total loaded ${collected.length}`);
+              })()
+            );
           }
 
-          // batch done
+          list.push(hotel);
+        });
+
+        // wait for reverse geocoding tasks to finish (best-effort)
+        try {
+          await Promise.all(missingAddressPromises);
+        } catch {
+          // ignore errors
         }
 
-        console.log("fetchHotels: collected count", collected.length);
-      } catch (err) {
-        console.error("Failed to fetch hotels", err);
-      } finally {
+        // sort by availability/price or name (simple stable ordering)
+        list.sort((a, b) => {
+          if (a.name && b.name) return a.name.localeCompare(b.name);
+          return 0;
+        });
+
+        setHotels(list);
+        setFilteredHotels(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Error listening to hotels collection:", err);
         setLoading(false);
       }
-    };
+    );
 
-    fetchHotels();
+    return () => unsubscribe();
   }, [mounted]);
 
   // Update filtered hotels whenever input or hotels change
@@ -321,17 +274,18 @@ export default function HotelsPage() {
 
     setSearchLoading(true);
 
-    // Prefix match on hotel name; fall back to address/location contains
     const filtered = hotels.filter((h) => {
       const name = (h.name || "").toLowerCase();
       const address = (h.address || "").toLowerCase();
-      const location = (h.location || "").toLowerCase();
+      const amenities = (h.amenities || []).join(" ").toLowerCase();
+      const priceStr = h.price ? String(h.price) : "";
 
-      const matchesNamePrefix = name.startsWith(trimmedInput);
+      const matchesNamePrefix = name.startsWith(trimmedInput) || name.includes(trimmedInput);
       const matchesAddress = address.includes(trimmedInput);
-      const matchesLocation = location.includes(trimmedInput);
+      const matchesAmenities = amenities.includes(trimmedInput);
+      const matchesPrice = priceStr.includes(trimmedInput);
 
-      return matchesNamePrefix || matchesAddress || matchesLocation;
+      return matchesNamePrefix || matchesAddress || matchesAmenities || matchesPrice;
     });
 
     setFilteredHotels(filtered);
@@ -342,22 +296,22 @@ export default function HotelsPage() {
     setFavorites((prev) => {
       const updated = prev.includes(hotelId) ? prev.filter((id) => id !== hotelId) : [...prev, hotelId];
       localStorage.setItem("favorites", JSON.stringify(updated));
-      
+
       // Also save full hotel info to localStorage for dashboard
       if (!prev.includes(hotelId)) {
         // Adding to favorites
-        const hotel = hotels.find(h => h.id === hotelId);
+        const hotel = hotels.find((h) => h.id === hotelId);
         if (hotel) {
           const savedHotels: Hotel[] = JSON.parse(localStorage.getItem("savedHotels") || "[]");
           const hotelData: Hotel = {
             id: hotel.id,
             name: hotel.name,
-            location: hotel.location,
+            // prefer structured location fields if present
             address: hotel.address,
             image: hotel.imageUrl,
             price: hotel.price,
             amenities: hotel.amenities || [],
-            description: `${hotel.roomType || "Room"} - Available: ${hotel.availability || 'N/A'}`,
+            description: `${hotel.roomType || "Room"} - Available: ${hotel.availability ?? "N/A"}`,
             latitude: hotel.latitude,
             longitude: hotel.longitude,
           };
@@ -373,7 +327,7 @@ export default function HotelsPage() {
         const filtered = savedHotels.filter((h) => h.id !== hotelId);
         localStorage.setItem("savedHotels", JSON.stringify(filtered));
       }
-      
+
       return updated;
     });
   };
@@ -396,13 +350,15 @@ export default function HotelsPage() {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude, longitude } = pos.coords;
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
-        );
-        const data = await res.json();
-        const city = data.address?.city || data.address?.town || data.address?.village || "";
-        if (city) {
-          setInputValue(city);
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+          const data = await res.json();
+          const city = data.address?.city || data.address?.town || data.address?.village || "";
+          if (city) {
+            setInputValue(city);
+          }
+        } catch (err) {
+          console.error("Reverse geocode failed for current location:", err);
         }
       },
       (err) => console.error(err)
@@ -419,10 +375,10 @@ export default function HotelsPage() {
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#4A70A9] dark:text-[#8FABD4]">Find your stay</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight text-[#000000] dark:text-zinc-50 md:text-4xl">
-              Explore Batangas hotels
+              Explore Batangas!
             </h1>
             <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-400">
-              Browse handpicked stays across Batangas with real-time availability and easy booking.
+              Where Every Stay Feels Right.
             </p>
           </div>
           <div className="flex flex-col gap-2 text-xs text-zinc-700 dark:text-zinc-300">
@@ -440,7 +396,7 @@ export default function HotelsPage() {
         </div>
 
         {/* Search bar and View Toggle */}
-        <div className="sticky top-16 z-40 flex items-center gap-3 rounded-2xl border border-[#8FABD4]/40 bg-[#EFECE3]/95 px-4 py-3 shadow-sm backdrop-blur dark:bg-zinc-900/95">
+        <div className="sticky top-16 z-40 flex items-center gap-3 rounded-2xl bg-transparent shadow-sm backdrop-blur dark:bg-transparent">
           <div className="relative flex-1 w-1/3">
             <Input
               type="text"
@@ -460,7 +416,7 @@ export default function HotelsPage() {
               📍
             </button>
           </div>
-          
+
           {/* View Mode Toggle */}
           <div className="flex gap-2 ml-auto">
             <Button
@@ -470,7 +426,7 @@ export default function HotelsPage() {
                 ? "rounded-full bg-[#4A70A9] px-4 py-2 text-xs font-medium text-white hover:bg-[#4A70A9]/90 dark:bg-[#8FABD4] dark:hover:bg-[#8FABD4]/90"
                 : "rounded-full border-[#8FABD4]/60 bg-white/70 px-4 py-2 text-xs font-medium text-zinc-800 hover:bg-white dark:border-[#8FABD4]/70 dark:bg-zinc-900 dark:text-zinc-100"}
             >
-              📋 Cards
+              🏨 Hotels
             </Button>
             <Button
               onClick={() => setViewMode("map")}
@@ -522,7 +478,7 @@ export default function HotelsPage() {
                       {typeof hotel.price === "number" && hotel.price > 0 && (
                         <div className="pointer-events-none absolute inset-x-3 bottom-3 flex gap-2 text-[11px] font-medium">
                           <span className="inline-flex items-baseline rounded-full bg-black/75 px-3 py-1 text-[#EFECE3] shadow-md dark:bg-black/70">
-                            <span className="mr-1 text-[10px] uppercase tracking-wide opacity-80">from</span>
+                            <span className="mr-1 text-[10px] uppercase tracking-wide opacity-80"></span>
                             <span className="text-sm">₱{hotel.price.toLocaleString()}</span>
                             <span className="ml-1 text-[10px] opacity-80">/night</span>
                           </span>
@@ -565,7 +521,7 @@ export default function HotelsPage() {
                           {hotel.price && hotel.price > 0 ? (
                             <>
                               <div className="text-[13px] font-semibold text-[#000000] dark:text-zinc-50">
-                                From <span className="text-base">₱{hotel.price.toLocaleString()}</span>
+                                <span className="text-base">₱{hotel.price.toLocaleString()}</span>
                               </div>
                               <div className="text-[11px] text-[#4A70A9] dark:text-[#8FABD4]">
                                 Includes taxes and charges
@@ -603,7 +559,6 @@ export default function HotelsPage() {
                   </Card>
                 </motion.div>
               ))}
-              
             </motion.div>
           ) : (
             // Map View
@@ -619,32 +574,34 @@ export default function HotelsPage() {
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                   />
-                  {filteredHotels.map((hotel) => (
-                    <Marker key={hotel.id} position={[hotel.latitude, hotel.longitude]}>
-                      <Popup>
-                        <div className="text-sm">
-                          <h3 className="font-bold text-base mb-1">{hotel.name}</h3>
-                          <p className="text-xs mb-2">{hotel.address}</p>
-                          {hotel.price && (
-                            <p className="text-xs font-semibold text-blue-600 mb-2">₱{hotel.price.toLocaleString()}</p>
-                          )}
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleBook(hotel)}
-                              disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
-                              className={`px-2 py-1 rounded text-xs font-medium transition ${
-                                hotel.availability === 0 || userBookings.includes(hotel.id)
-                                  ? "bg-gray-400 cursor-not-allowed"
-                                  : "bg-blue-600 text-white hover:bg-blue-700"
-                              }`}
-                            >
-                              Book
-                            </button>
+                  {filteredHotels.map((hotel) =>
+                    hotel.latitude && hotel.longitude ? (
+                      <Marker key={hotel.id} position={[hotel.latitude, hotel.longitude]}>
+                        <Popup>
+                          <div className="text-sm">
+                            <h3 className="font-bold text-base mb-1">{hotel.name}</h3>
+                            <p className="text-xs mb-2">{hotel.address}</p>
+                            {hotel.price && (
+                              <p className="text-xs font-semibold text-blue-600 mb-2">₱{hotel.price.toLocaleString()}</p>
+                            )}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleBook(hotel)}
+                                disabled={hotel.availability === 0 || userBookings.includes(hotel.id)}
+                                className={`px-2 py-1 rounded text-xs font-medium transition ${
+                                  hotel.availability === 0 || userBookings.includes(hotel.id)
+                                    ? "bg-gray-400 cursor-not-allowed"
+                                    : "bg-blue-600 text-white hover:bg-blue-700"
+                                }`}
+                              >
+                                Book
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
+                        </Popup>
+                      </Marker>
+                    ) : null
+                  )}
                 </MapContainer>
               </div>
             )
@@ -684,7 +641,7 @@ export default function HotelsPage() {
                 ×
               </button>
               <MapContainer
-                center={[selectedHotel.latitude, selectedHotel.longitude]}
+                center={[selectedHotel.latitude || 13.7569, selectedHotel.longitude || 121.0583]}
                 zoom={16}
                 scrollWheelZoom
                 style={{ width: "100%", height: "100%" }}
@@ -694,17 +651,19 @@ export default function HotelsPage() {
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                   attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 />
-                <Marker position={[selectedHotel.latitude, selectedHotel.longitude]}>
-                  <Popup>
-                    <div>
-                      <h3 className="font-bold">{selectedHotel.name}</h3>
-                      <p>{selectedHotel.address}</p>
-                      {selectedHotel.price && (
-                        <p>₱{selectedHotel.price.toLocaleString()} / {selectedHotel.currency ?? "PHP"}</p>
-                      )}
-                    </div>
-                  </Popup>
-                </Marker>
+                {selectedHotel.latitude && selectedHotel.longitude && (
+                  <Marker position={[selectedHotel.latitude, selectedHotel.longitude]}>
+                    <Popup>
+                      <div>
+                        <h3 className="font-bold">{selectedHotel.name}</h3>
+                        <p>{selectedHotel.address}</p>
+                        {selectedHotel.price && (
+                          <p>₱{selectedHotel.price.toLocaleString()} / {selectedHotel.currency ?? "PHP"}</p>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                )}
               </MapContainer>
             </div>
           </div>
