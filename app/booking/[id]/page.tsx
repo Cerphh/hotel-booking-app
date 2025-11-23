@@ -86,10 +86,11 @@ export default function HotelDetailsPage() {
     const fetchRecommendations = async () => {
       setLoadingRecommendations(true);
       try {
+        const hotelContextName = `${hotel.name}${hotel.address ? ', ' + hotel.address : ''}`;
         const result = await getNearbyRecommendations(
           hotel.latitude,
           hotel.longitude,
-          hotel.name
+          hotelContextName
         );
         setRecommendations(result.recommendations);
       } catch (error) {

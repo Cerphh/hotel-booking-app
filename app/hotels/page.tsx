@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
+import Image from "next/image";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -462,10 +463,12 @@ export default function HotelsPage() {
                 <motion.div key={hotel.id + i} variants={staggerItem}>
                   <Card className="flex h-full flex-col overflow-hidden rounded-2xl border border-[#8FABD4]/40 bg-white/95 shadow-[0_18px_45px_rgba(15,23,42,0.12)] dark:border-[#8FABD4]/40 dark:bg-zinc-900">
                     <div className="relative h-44 w-full overflow-hidden bg-muted dark:bg-zinc-800">
-                      <img
-                        src={hotel.imageUrl}
-                        className="h-full w-full object-cover transition duration-500 hover:scale-105"
-                        alt={hotel.name}
+                      <Image
+                        src={hotel.imageUrl || `https://source.unsplash.com/600x400/?hotel,${encodeURIComponent(String(hotel.name || 'hotel'))}`}
+                        alt={hotel.name || 'Hotel image'}
+                        fill
+                        className="object-cover transition duration-500 hover:scale-105"
+                        unoptimized
                       />
                       <Button
                         size="icon"

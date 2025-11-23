@@ -3,8 +3,10 @@
 import { useAuth } from "@/lib/auth-context";
 import { GoogleSignInButton } from "@/components/google-signin-button";
 import { TermsAndConditionsDialog } from "@/components/terms-and-conditions";
-import { useState } from "react";
-import { redirect } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/lib/firebase";
 import { motion } from "framer-motion";
 import { fadeInUp, scaleIn } from "@/lib/animations";
 import Link from "next/link";
@@ -13,11 +15,48 @@ import { Button } from "@/components/ui/button";
 
 export default function SignInPage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
+  const ADMIN_EMAIL = "admin@gmail.com";
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [showAdminForm, setShowAdminForm] = useState(false);
+  const [adminAgreedToTerms, setAdminAgreedToTerms] = useState(false);
   // Support redirecting to intended page after login
-  // For demo, always redirect to /dashboard after login
-  if (!loading && user) {
-    redirect("/dashboard");
-  }
+  // For demo, navigate client-side after auth state is known
+  useEffect(() => {
+    if (loading) return;
+    if (!user) return;
+    const email = user?.email?.toLowerCase?.() || "";
+    if (email === "admin@gmail.com") {
+      router.replace("/admin");
+      return;
+    }
+    router.replace("/dashboard");
+  }, [loading, user, router]);
+
+  const handleAdminSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminAgreedToTerms) {
+      alert("You must agree to the Terms & Conditions to sign in as admin");
+      return;
+    }
+    const email = adminEmail.trim().toLowerCase();
+    const password = adminPassword;
+    if (email !== ADMIN_EMAIL) {
+      alert("Invalid admin email");
+      return;
+    }
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged in AuthProvider will trigger redirect; also navigate immediately
+      router.push("/admin");
+    } catch (err) {
+      console.error("Firebase admin sign-in failed:", err);
+      const msg = (err as Error)?.message || "Failed to sign in";
+      alert(msg);
+    }
+  };
 
   // State for Terms modal
   const [termsOpen, setTermsOpen] = useState(false);
@@ -72,12 +111,74 @@ export default function SignInPage() {
             </p>
           </motion.div>
 
+          {!showAdminForm && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4, duration: 0.5 }}
+            >
+              <GoogleSignInButton />
+            </motion.div>
+          )}
+
+          {/* Admin sign-in (email + password) for quick access during development */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            className="mt-6"
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 0.5 }}
+            transition={{ delay: 0.45 }}
           >
-            <GoogleSignInButton />
+              {!showAdminForm ? (
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    className="bg-zinc-200 text-zinc-800 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                    onClick={() => setShowAdminForm(true)}
+                  >
+                    Sign in
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleAdminSignIn} className="flex flex-col gap-2">
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    className="w-full px-3 py-2 border rounded bg-white dark:bg-zinc-800 text-black dark:text-white"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full px-3 py-2 border rounded bg-white dark:bg-zinc-800 text-black dark:text-white"
+                  />
+
+                  <label className="flex items-center gap-2 mt-1">
+                    <input
+                      type="checkbox"
+                      checked={adminAgreedToTerms}
+                      onChange={(e) => setAdminAgreedToTerms(e.target.checked)}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-sm text-zinc-600 dark:text-zinc-400">I agree to the{' '}
+                      <button
+                        type="button"
+                        className="text-blue-600 hover:underline dark:text-blue-400 bg-transparent border-none p-0 m-0"
+                        onClick={() => setTermsOpen(true)}
+                      >
+                        Terms & Conditions
+                      </button>
+                    </span>
+                  </label>
+
+                  <div className="flex justify-end gap-2">
+                    <Button type="submit" disabled={!adminAgreedToTerms}>Sign in</Button>
+                    <Button variant="outline" onClick={() => setShowAdminForm(false)}>Cancel</Button>
+                  </div>
+                </form>
+              )}
           </motion.div>
 
           <motion.div

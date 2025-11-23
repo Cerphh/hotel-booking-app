@@ -6,9 +6,13 @@
 
 export interface NearbyRecommendation {
   name: string;
-  type: "restaurant" | "entertainment" | "attraction";
+  type: "restaurant" | "entertainment" | "attraction" | string;
   description: string;
   distance: string;
+  walkingTime?: string;
+  reason?: string;
+  address?: string;
+  confidence?: string;
   imageUrl?: string;
 }
 
@@ -26,16 +30,17 @@ export async function getNearbyRecommendations(
   hotelName: string
 ): Promise<OllamaRecommendations> {
   try {
-    const prompt = `You are a helpful travel assistant. Provide exactly 6 nearby recommendations (2 restaurants, 2 entertainment venues, 2 attractions) within 2 km of coordinates (${latitude}, ${longitude}) near the hotel "${hotelName}" in Batangas, Philippines.
+    const prompt = `You are a factual travel assistant. Using the coordinates (${latitude}, ${longitude}) and the hotel name "${hotelName}", return up to 8 nearby places (prioritize restaurants, attractions, entertainment, cafes, viewpoints) within 3 km, sorted by proximity. Use only real, verifiable places when possible. If you are unsure about a place, mark its confidence as "low".
 
-Format your response as a JSON array with this exact structure, nothing else:
-[
-  {"name": "Restaurant Name", "type": "restaurant", "description": "Brief description", "distance": "0.5 km"},
-  {"name": "Entertainment Venue", "type": "entertainment", "description": "Brief description", "distance": "1.2 km"},
-  {"name": "Attraction Name", "type": "attraction", "description": "Brief description", "distance": "1.8 km"}
-]
+Return a single JSON object with a top-level "recommendations" array. Each recommendation must include: name, type (one of: restaurant, entertainment, attraction, cafe, viewpoint, other), description (1 short sentence), distance (use meters or km), walkingTime (estimate like "10 min walk"), reason (one short phrase why visit), and optionally address and any external id/source. Example structure (follow exactly, do not add extra text):
 
-Provide real or realistic recommendations for Batangas area. Keep descriptions to 1-2 sentences.`;
+{
+  "recommendations": [
+    {"name":"Example Place","type":"attraction","description":"Short 1-sentence description.","distance":"0.5 km","walkingTime":"6 min","reason":"Scenic view of the bay","address":"123 Main St","confidence":"high"}
+  ]
+}
+
+Keep descriptions concise and truthful. Do not include commentary or preface — output only the JSON object.`;
 
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
       method: "POST",
@@ -46,7 +51,7 @@ Provide real or realistic recommendations for Batangas area. Keep descriptions t
         model: OLLAMA_MODEL,
         prompt,
         stream: false,
-        temperature: 0.7,
+        temperature: 0.2,
       }),
     });
 
@@ -59,27 +64,74 @@ Provide real or realistic recommendations for Batangas area. Keep descriptions t
     }
 
     const data = await response.json();
-    const responseText = data.response || "";
+    const responseText = data.response || data.text || JSON.stringify(data);
 
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      console.warn("Could not parse JSON from Ollama response");
+    // Try to extract a JSON object that contains a "recommendations" key
+    const objMatch = responseText.match(/"recommendations"\s*:\s*(\[[\s\S]*\])/i);
+    let recommendations: NearbyRecommendation[] | null = null;
+
+    if (objMatch && objMatch[1]) {
+      try {
+        recommendations = JSON.parse(objMatch[1]) as NearbyRecommendation[];
+      } catch (err) {
+        console.warn("Failed to parse recommendations array, falling back to full JSON parse", err);
+      }
+    }
+
+    // As a fallback, try to parse a top-level object with recommendations
+    if (!recommendations) {
+      try {
+        const parsed = JSON.parse(responseText);
+        if (parsed && Array.isArray(parsed.recommendations)) {
+          recommendations = parsed.recommendations as NearbyRecommendation[];
+        }
+      } catch (err) {
+        console.warn("Could not parse JSON from Ollama response", err);
+      }
+    }
+
+    if (!recommendations) {
+      console.warn("Could not parse recommendations from Ollama response");
       return {
         recommendations: getMockRecommendations(),
         error: "Could not parse recommendations",
       };
     }
 
-    const recommendations = JSON.parse(jsonMatch[0]) as NearbyRecommendation[];
+    // Verify and enrich recommendations with geocoding (Nominatim) to improve accuracy
+    const verified = await Promise.all(
+      recommendations.map(async (rec, idx) => {
+        try {
+          const geocoded = await geocodePlace(rec.name, latitude, longitude, rec.address || "");
+          const imageUrl = getUnsplashImageUrl(rec.type, idx);
+          return {
+            ...rec,
+            // prefer geocoded distance/address if available
+            distance: geocoded?.distanceStr || rec.distance,
+            walkingTime: geocoded?.walkingTime || rec.walkingTime,
+            address: geocoded?.address || rec.address,
+            confidence: geocoded?.confidence || (rec as any).confidence || "low",
+            imageUrl,
+          } as NearbyRecommendation & { confidence?: string };
+        } catch (e) {
+          return {
+            ...rec,
+            imageUrl: getUnsplashImageUrl(rec.type, idx),
+            confidence: (rec as any).confidence || "low",
+          } as NearbyRecommendation & { confidence?: string };
+        }
+      })
+    );
 
-    // Add mock image URLs from Unsplash
-    const enrichedRecommendations = recommendations.map((rec, idx) => ({
-      ...rec,
-      imageUrl: getUnsplashImageUrl(rec.type, idx),
-    }));
+    // Filter or sort: keep only places within 3 km, but if none are within range, return original list
+    const within3km = verified.filter((r) => {
+      const d = parseDistanceMeters(r.distance || "");
+      return d !== null && d <= 3000;
+    });
 
-    return { recommendations: enrichedRecommendations };
+    const finalRecommendations = within3km.length > 0 ? within3km : verified;
+
+    return { recommendations: finalRecommendations as NearbyRecommendation[] };
   } catch (error) {
     console.error("Error fetching Ollama recommendations:", error);
     return {
@@ -99,6 +151,60 @@ function getUnsplashImageUrl(type: string, index: number): string {
   const typeQueries = queries[type] || ["travel"];
   const query = typeQueries[index % typeQueries.length];
   return `https://source.unsplash.com/400x300/?${encodeURIComponent(query)},batangas`;
+}
+
+async function geocodePlace(name: string, hotelLat: number, hotelLon: number, hintAddress = "") {
+  try {
+    const q = encodeURIComponent(`${name} ${hintAddress}`.trim());
+    // Nominatim public instance - for production consider your own instance or a paid geocoding API
+    const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "HotBook/1.0 (hotbook@example.com)" },
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (!Array.isArray(j) || j.length === 0) return null;
+    const place = j[0];
+    const lat = parseFloat(place.lat);
+    const lon = parseFloat(place.lon);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+
+    const meters = haversineDistanceMeters(hotelLat, hotelLon, lat, lon);
+    const distanceStr = meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(2)} km`;
+    const walkingMinutes = Math.max(1, Math.round((meters / 1000) / 5 * 60)); // 5 km/h walking speed
+    const walkingTime = `${walkingMinutes} min walk`;
+    const address = place.display_name || hintAddress || undefined;
+    const confidence = meters <= 3000 ? "high" : "low";
+    return { lat, lon, distance: meters, distanceStr, walkingTime, address, confidence };
+  } catch (err) {
+    return null;
+  }
+}
+
+function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const R = 6371000; // meters
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function parseDistanceMeters(distanceStr?: string | null) {
+  if (!distanceStr) return null;
+  try {
+    const s = distanceStr.trim();
+    if (s.endsWith("m")) return parseFloat(s.replace(/[^0-9.]/g, ""));
+    if (s.endsWith("km")) return parseFloat(s.replace(/[^0-9.]/g, "")) * 1000;
+    // fallback: try number
+    const n = parseFloat(s.replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) ? n : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function getMockRecommendations(): NearbyRecommendation[] {

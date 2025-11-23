@@ -15,11 +15,14 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 import { useState } from "react";
 import { usePathname } from "next/navigation"; // <-- to detect current page
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import AddHotelForm from "./add-hotel-form";
 
 export function Navbar() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname(); // current path
+  const isAdmin = user?.email?.toLowerCase() === "admin@gmail.com";
 
   const handleLogout = async () => {
     await logout();
@@ -30,6 +33,7 @@ export function Navbar() {
     { href: "/dashboard", label: "Dashboard" },
     { href: "#", label: "About" },
   ];
+  const isAdminPage = pathname?.startsWith("/admin");
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[#8FABD4]/40 bg-[#EFECE3]/95 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
@@ -47,20 +51,37 @@ export function Navbar() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-4">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`px-4 py-2 text-sm font-medium transition rounded-full
-                  ${
-                    pathname === link.href
-                      ? "bg-[#4A70A9] text-white shadow-sm"
-                      : "text-zinc-700 hover:text-[#000000] dark:text-zinc-300 dark:hover:text-white"
-                  }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+            {navLinks
+              .filter((link) => !(isAdminPage && (link.label === "Hotels" || link.label === "About")))
+              .map((link) => {
+                // When on the admin page, make Dashboard visually active but not clickable
+                if (isAdminPage && link.label === "Dashboard") {
+                  return (
+                    <span
+                      key={link.href}
+                      aria-disabled
+                      className="px-4 py-2 text-sm font-medium rounded-full bg-[#4A70A9] text-white shadow-sm"
+                    >
+                      {link.label}
+                    </span>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`px-4 py-2 text-sm font-medium transition rounded-full
+                      ${
+                        pathname === link.href
+                          ? "bg-[#4A70A9] text-white shadow-sm"
+                          : "text-zinc-700 hover:text-[#000000] dark:text-zinc-300 dark:hover:text-white"
+                      }`}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              })}
           </div>
 
           {/* User Menu / Auth Buttons */}
@@ -81,44 +102,47 @@ export function Navbar() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <div className="px-2 py-1.5">
-                    <p className="text-sm font-medium text-black dark:text-white">
-                      {user.displayName}
-                    </p>
+                    <p className="text-sm font-medium text-black dark:text-white">{user.displayName}</p>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
                   </div>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard">My Bookings</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/profile">Profile Settings</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link href="/favorites">Saved Hotels</Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 dark:text-red-400">
-                    Sign Out
-                  </DropdownMenuItem>
+                  {isAdmin ? (
+                    // Admin menu: only Sign Out (Add Hotel removed from dropdown)
+                    <>
+                      <DropdownMenuItem onClick={handleLogout} className="text-red-600 dark:text-red-400">
+                        Sign Out
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    // Regular user menu
+                    <>
+                      <DropdownMenuItem asChild>
+                        <Link href="/dashboard">My Bookings</Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href="/profile">Profile Settings</Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link href="/favorites">Saved Hotels</Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleLogout} className="text-red-600 dark:text-red-400">
+                        Sign Out
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
               <Link href="/signin">
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90"
-                >
+                <Button variant="default" size="sm" className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90">
                   Sign In
                 </Button>
               </Link>
             )}
 
             {/* Mobile Menu Toggle */}
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden rounded-lg p-2 hover:bg-[#8FABD4]/20 dark:hover:bg-zinc-900"
-            >
+            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden rounded-lg p-2 hover:bg-[#8FABD4]/20 dark:hover:bg-zinc-900">
               <Menu className="w-5 h-5" />
             </button>
           </div>
@@ -127,20 +151,32 @@ export function Navbar() {
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-[#8FABD4]/40 bg-[#EFECE3]/95 py-4 space-y-2 dark:border-zinc-800 dark:bg-zinc-950">
-            {navLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`block rounded-full px-4 py-2 text-sm font-medium transition
-                  ${
-                    pathname === link.href
-                      ? "bg-[#4A70A9] text-white shadow-sm"
-                      : "text-zinc-700 hover:bg-[#8FABD4]/20 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                  }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+            {navLinks
+              .filter((link) => !(isAdminPage && (link.label === "Hotels" || link.label === "About")))
+              .map((link) => {
+                if (isAdminPage && link.label === "Dashboard") {
+                  return (
+                    <div key={link.href} aria-disabled className="block rounded-full px-4 py-2 text-sm font-medium transition bg-[#4A70A9] text-white shadow-sm">
+                      {link.label}
+                    </div>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`block rounded-full px-4 py-2 text-sm font-medium transition
+                      ${
+                        pathname === link.href
+                          ? "bg-[#4A70A9] text-white shadow-sm"
+                          : "text-zinc-700 hover:bg-[#8FABD4]/20 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      }`}
+                  >
+                    {link.label}
+                  </Link>
+                );
+              })}
           </div>
         )}
       </div>
