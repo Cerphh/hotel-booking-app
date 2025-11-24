@@ -122,9 +122,6 @@ export function Navbar() {
                       <DropdownMenuItem asChild>
                         <Link href="/profile">Profile Settings</Link>
                       </DropdownMenuItem>
-                      <DropdownMenuItem asChild>
-                        <Link href="/favorites">Saved Hotels</Link>
-                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={handleLogout} className="text-red-600 dark:text-red-400">
                         Sign Out

@@ -240,13 +240,14 @@ export default function HotelDetailsPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="h-96 overflow-hidden rounded-xl shadow-md"
+            className="relative z-10 h-96 overflow-hidden rounded-xl shadow-md"
           >
             <MapContainer
               center={[hotel.latitude, hotel.longitude]}
               zoom={16}
               scrollWheelZoom
-              style={{ width: "100%", height: "100%" }}
+              style={{ width: "100%", height: "100%", zIndex: 0 }}
+              className="isolate"
             >
               <TileLayer
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

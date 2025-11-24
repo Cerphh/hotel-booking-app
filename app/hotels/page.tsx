@@ -63,8 +63,8 @@ interface Hotel {
   [k: string]: any;
 }
 
-const checkIn = new Date().toISOString().split("T")[0];
-const checkOut = (() => {
+const DEFAULT_CHECK_IN = new Date().toISOString().split("T")[0];
+const DEFAULT_CHECK_OUT = (() => {
   const tomorrow = new Date();
   tomorrow.setDate(new Date().getDate() + 1);
   return tomorrow.toISOString().split("T")[0];
@@ -148,6 +148,16 @@ export default function HotelsPage() {
   const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
   const [userBookings, setUserBookings] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"cards" | "map">("cards");
+  const [checkInDate, setCheckInDate] = useState(DEFAULT_CHECK_IN);
+  const [checkOutDate, setCheckOutDate] = useState(DEFAULT_CHECK_OUT);
+
+  useEffect(() => {
+    if (new Date(checkOutDate).getTime() <= new Date(checkInDate).getTime()) {
+      const nextDay = new Date(checkInDate);
+      nextDay.setDate(nextDay.getDate() + 1);
+      setCheckOutDate(nextDay.toISOString().split("T")[0]);
+    }
+  }, [checkInDate, checkOutDate]);
 
   useEffect(() => setMounted(true), []);
 
@@ -339,7 +349,7 @@ export default function HotelsPage() {
       redirect("/signin");
       return;
     }
-    localStorage.setItem("selectedHotel", JSON.stringify({ ...hotel, checkIn, checkOut, guests: 1 }));
+    localStorage.setItem("selectedHotel", JSON.stringify({ ...hotel, checkIn: checkInDate, checkOut: checkOutDate, guests: 1 }));
     redirect(`/booking/${hotel.id}`);
   };
 
@@ -382,7 +392,7 @@ export default function HotelsPage() {
               Where Every Stay Feels Right.
             </p>
           </div>
-          <div className="flex flex-col gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+          <div className="flex flex-col gap-3 text-xs text-zinc-700 dark:text-zinc-300">
             <div className="flex items-center gap-2">
               <Badge className="border-[#8FABD4]/50 bg-[#8FABD4]/15 text-[11px] text-[#4A70A9] dark:border-[#8FABD4]/60 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]">Flexible dates</Badge>
               <Badge
@@ -392,7 +402,28 @@ export default function HotelsPage() {
                 No booking fees
               </Badge>
             </div>
-            <p>Check-in: {checkIn} · Check-out: {checkOut}</p>
+            <div className="grid gap-2 text-xs sm:grid-cols-2">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Check-in</span>
+                <Input
+                  type="date"
+                  value={checkInDate}
+                  min={DEFAULT_CHECK_IN}
+                  onChange={(e) => setCheckInDate(e.target.value)}
+                  className="h-9 rounded-full border-[#8FABD4]/40 bg-white/90 text-[12px] dark:border-[#8FABD4]/60 dark:bg-zinc-900"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Check-out</span>
+                <Input
+                  type="date"
+                  value={checkOutDate}
+                  min={checkInDate || DEFAULT_CHECK_OUT}
+                  onChange={(e) => setCheckOutDate(e.target.value)}
+                  className="h-9 rounded-full border-[#8FABD4]/40 bg-white/90 text-[12px] dark:border-[#8FABD4]/60 dark:bg-zinc-900"
+                />
+              </label>
+            </div>
           </div>
         </div>
 

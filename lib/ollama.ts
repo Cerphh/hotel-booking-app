@@ -30,9 +30,9 @@ export async function getNearbyRecommendations(
   hotelName: string
 ): Promise<OllamaRecommendations> {
   try {
-    const prompt = `You are a factual travel assistant. Using the coordinates (${latitude}, ${longitude}) and the hotel name "${hotelName}", return up to 8 nearby places (prioritize restaurants, attractions, entertainment, cafes, viewpoints) within 3 km, sorted by proximity. Use only real, verifiable places when possible. If you are unsure about a place, mark its confidence as "low".
+    const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" located at latitude ${latitude} and longitude ${longitude}. Recommend only real places that are walkable from this exact spot (roughly within 2 km). Skip famous Batangas-wide attractions unless they truly fall inside that radius. Prioritize restaurants, cafes, attractions, viewpoints, and entertainment that a traveler could realistically reach from the hotel. Sort results by nearest first and cap the list at 8 entries. If a place cannot be verified near the coordinates, omit it or mark confidence "low".
 
-Return a single JSON object with a top-level "recommendations" array. Each recommendation must include: name, type (one of: restaurant, entertainment, attraction, cafe, viewpoint, other), description (1 short sentence), distance (use meters or km), walkingTime (estimate like "10 min walk"), reason (one short phrase why visit), and optionally address and any external id/source. Example structure (follow exactly, do not add extra text):
+  Return a single JSON object with a top-level "recommendations" array. Each recommendation must include: name, type (one of: restaurant, entertainment, attraction, cafe, viewpoint, other), description (1 short sentence), distance (explicit distance from the hotel in meters or km), walkingTime (estimate like "10 min walk"), reason (why it suits this traveler), and optionally address plus confidence. Example structure (follow exactly, do not add extra text):
 
 {
   "recommendations": [
@@ -40,7 +40,7 @@ Return a single JSON object with a top-level "recommendations" array. Each recom
   ]
 }
 
-Keep descriptions concise and truthful. Do not include commentary or preface — output only the JSON object.`;
+Keep descriptions concise, tie each place to the provided coordinates, and output only the JSON object (no prose before or after).`;
 
     const response = await fetch(`${OLLAMA_API}/api/generate`, {
       method: "POST",
@@ -56,9 +56,9 @@ Keep descriptions concise and truthful. Do not include commentary or preface —
     });
 
     if (!response.ok) {
-      console.error(`Ollama API error: ${response.status}`);
+      console.warn(`Ollama API error: ${response.status}`);
       return {
-        recommendations: getMockRecommendations(),
+        recommendations: getMockRecommendations(hotelName, latitude, longitude),
         error: "Ollama service unavailable, using mock data",
       };
     }
@@ -93,7 +93,7 @@ Keep descriptions concise and truthful. Do not include commentary or preface —
     if (!recommendations) {
       console.warn("Could not parse recommendations from Ollama response");
       return {
-        recommendations: getMockRecommendations(),
+        recommendations: getMockRecommendations(hotelName, latitude, longitude),
         error: "Could not parse recommendations",
       };
     }
@@ -133,9 +133,11 @@ Keep descriptions concise and truthful. Do not include commentary or preface —
 
     return { recommendations: finalRecommendations as NearbyRecommendation[] };
   } catch (error) {
-    console.error("Error fetching Ollama recommendations:", error);
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("Ollama fetch failed, serving mock data", error);
+    }
     return {
-      recommendations: getMockRecommendations(),
+      recommendations: getMockRecommendations(hotelName, latitude, longitude),
       error: "Failed to fetch recommendations",
     };
   }
@@ -207,49 +209,69 @@ function parseDistanceMeters(distanceStr?: string | null) {
   }
 }
 
-function getMockRecommendations(): NearbyRecommendation[] {
-  return [
+function getMockRecommendations(hotelName?: string, latitude?: number, longitude?: number): NearbyRecommendation[] {
+  const primaryName = hotelName?.split(",")[0]?.trim() || "your stay";
+  const areaName = hotelName?.split(",").slice(1).join(",").trim() || "the neighborhood";
+
+  const fallbackPlaces = [
     {
-      name: "Bulalo Turo Turo",
+      name: `${primaryName} Courtyard Cafe`,
+      type: "cafe",
+      description: `Cozy espresso nook tucked beside ${primaryName}.`,
+      baseDistance: 80,
+      reason: "Grab coffee steps from the lobby",
+    },
+    {
+      name: `${areaName} Street Eats Lane`,
       type: "restaurant",
-      description: "Famous local restaurant serving traditional Batangas bulalo (beef marrow soup) and Filipino dishes.",
-      distance: "0.8 km",
-      imageUrl: "https://source.unsplash.com/400x300/?restaurant,food",
+      description: `Cluster of sizzling ihaw-ihaw stalls loved by locals of ${areaName}.`,
+      baseDistance: 320,
+      reason: "Sample authentic street bites",
     },
     {
-      name: "Bauan Fishing Port & Market",
-      type: "restaurant",
-      description: "Fresh seafood market and restaurant with local delicacies and ocean views.",
-      distance: "1.5 km",
-      imageUrl: "https://source.unsplash.com/400x300/?seafood,market",
+      name: `Sunset Deck at ${primaryName}`,
+      type: "viewpoint",
+      description: `Rooftop perch overlooking ${areaName}'s coastline for golden-hour photos.`,
+      baseDistance: 650,
+      reason: "Unwind with skyline views",
     },
     {
-      name: "Mabini Night Market",
-      type: "entertainment",
-      description: "Vibrant night market with local food vendors, street performances, and entertainment.",
-      distance: "1.2 km",
-      imageUrl: "https://source.unsplash.com/400x300/?nightlife,entertainment",
-    },
-    {
-      name: "Karaoke Nights Bar",
-      type: "entertainment",
-      description: "Popular karaoke bar with local Filipino bands and great atmosphere for evening fun.",
-      distance: "0.6 km",
-      imageUrl: "https://source.unsplash.com/400x300/?karaoke,bar",
-    },
-    {
-      name: "Taal Volcano National Park",
+      name: `${areaName} Heritage Plaza`,
       type: "attraction",
-      description: "UNESCO World Heritage site with stunning volcanic landscape and hiking trails. One of the most famous landmarks in the region.",
-      distance: "2.0 km",
-      imageUrl: "https://source.unsplash.com/400x300/?volcano,nature",
+      description: `Pocket park showcasing local artisans and weekend acoustic sets.`,
+      baseDistance: 1100,
+      reason: "Support neighborhood makers",
     },
     {
-      name: "Liliw Heritage Town",
-      type: "attraction",
-      description: "Historic town known for its traditional Spanish colonial architecture and local handicrafts.",
-      distance: "1.8 km",
-      imageUrl: "https://source.unsplash.com/400x300/?historic,architecture",
+      name: `${areaName} Vinyl & Vibes Bar`,
+      type: "entertainment",
+      description: `Under-the-radar speakeasy spinning OPM classics near ${primaryName}.`,
+      baseDistance: 1600,
+      reason: "Nightcap with live music",
     },
   ];
+
+  return fallbackPlaces.map((place, idx) => ({
+    name: place.name,
+    type: place.type,
+    description: place.description,
+    distance: formatDistance(place.baseDistance + idx * 40),
+    walkingTime: formatWalkingTime(place.baseDistance + idx * 40),
+    reason: place.reason,
+    address: areaName,
+    confidence: "medium",
+    imageUrl: getUnsplashImageUrl(place.type, idx),
+  }));
+}
+
+function formatDistance(meters: number) {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function formatWalkingTime(meters: number) {
+  const minutes = Math.max(2, Math.round((meters / 1000) / 5 * 60));
+  return `${minutes} min walk`;
 }

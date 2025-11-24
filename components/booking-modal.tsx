@@ -228,7 +228,7 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
               </div>
 
               {/* Right: image + price summary */}
-              <div className="w-full max-w-xs space-y-3 rounded-xl border border-[#8FABD4]/40 bg-[#EFECE3] p-4 text-xs sm:text-[13px]">
+              <div className="w-full max-w-xs space-y-3 rounded-xl border border-[#8FABD4]/40 bg-[#EFECE3] text-[#1B3054] p-4 text-xs sm:text-[13px] dark:border-[#8FABD4]/60 dark:bg-zinc-950/60 dark:text-zinc-100">
                 {hotel.imageUrl && (
                   <div className="mb-2 h-24 w-full overflow-hidden rounded-lg bg-zinc-200">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -241,30 +241,30 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
                 )}
 
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-[#000000] dark:text-foreground">Price breakdown</span>
-                  <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-[11px] text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-900/30 dark:text-emerald-100">
+                  <span className="font-medium text-[#000000] dark:text-white">Price breakdown</span>
+                  <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-[11px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-100">
                     {nightsCount} night{nightsCount > 1 ? "s" : ""}
                   </Badge>
                 </div>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span>Base ({nightsCount}×):</span>
-                    <span>₱{(basePrice * nightsCount).toLocaleString()}</span>
+                    <span className="text-zinc-700 dark:text-zinc-300">Base ({nightsCount}×):</span>
+                    <span className="font-semibold text-[#000000] dark:text-white">₱{(basePrice * nightsCount).toLocaleString()}</span>
                   </div>
                   {roomExtra > 0 && (
                     <div className="flex items-center justify-between">
-                      <span>Room upgrade:</span>
-                      <span>₱{(roomExtra * nightsCount).toLocaleString()}</span>
+                      <span className="text-zinc-700 dark:text-zinc-300">Room upgrade:</span>
+                      <span className="font-semibold text-[#000000] dark:text-white">₱{(roomExtra * nightsCount).toLocaleString()}</span>
                     </div>
                   )}
                 </div>
 
-                <div className="border-t border-border pt-2 text-[11px] text-muted-foreground">
+                <div className="border-t border-border pt-2 text-[11px] text-muted-foreground dark:text-zinc-400">
                   <p>Includes local taxes and fees · Free cancellation where applicable.</p>
                 </div>
 
-                <div className="flex items-center justify-between border-t border-border pt-3 text-[13px] font-semibold">
+                <div className="flex items-center justify-between border-t border-border pt-3 text-[13px] font-semibold text-[#000000] dark:text-white">
                   <span>Total for stay</span>
                   <span className="text-base">₱{totalPrice.toLocaleString()}</span>
                 </div>
