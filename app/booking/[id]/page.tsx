@@ -323,7 +323,7 @@ export default function HotelDetailsPage() {
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.2 }}
-        className="sticky top-8 h-fit rounded-2xl border border-[#8FABD4]/40 bg-white/95 p-6 shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
+        className="sticky top-28 h-fit rounded-2xl border border-[#8FABD4]/40 bg-white/95 p-6 shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
       >
         <h2 className="text-xl font-semibold text-[#000000] dark:text-zinc-50">Booking Summary</h2>
 

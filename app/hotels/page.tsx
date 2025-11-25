@@ -424,7 +424,7 @@ export default function HotelsPage() {
         </div>
 
         {/* Search bar and View Toggle */}
-        <div className="sticky top-16 z-40 flex items-center gap-3 rounded-2xl bg-transparent shadow-sm backdrop-blur dark:bg-transparent">
+        <div className="sticky top-20 z-40 flex items-center gap-3 rounded-2xl bg-transparent shadow-sm backdrop-blur dark:bg-transparent">
           <div className="relative flex-1 w-1/3">
             <Input
               type="text"
