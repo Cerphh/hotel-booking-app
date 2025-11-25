@@ -109,12 +109,12 @@ export default function HotelDetailsPage() {
 
   // Check if hotel is already booked
   useEffect(() => {
-    if (!user?.email || !hotel) return;
+    if (!user?.uid || !hotel) return;
 
     const db = getFirestore(app);
     const q = query(
       collection(db, "bookings"),
-      where("userEmail", "==", user.email),
+      where("userId", "==", user.uid),
       where("hotelId", "==", hotel.id)
     );
 
