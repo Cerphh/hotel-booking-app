@@ -175,13 +175,13 @@ export default function HotelsPage() {
 
   // Fetch user bookings from Firestore
   useEffect(() => {
-    if (!mounted || !user?.email) {
+    if (!mounted || !user?.uid) {
       setUserBookings([]);
       return;
     }
 
     const db = getFirestore(app);
-    const q = query(collection(db, "bookings"), where("userEmail", "==", user.email));
+    const q = query(collection(db, "bookings"), where("userId", "==", user.uid));
 
     const unsubscribe = onSnapshot(
       q,
@@ -198,7 +198,7 @@ export default function HotelsPage() {
     );
 
     return () => unsubscribe();
-  }, [mounted, user?.email]);
+  }, [mounted, user?.uid]);
 
   // Load hotels from Firestore (real-time)
   useEffect(() => {
@@ -290,22 +290,27 @@ export default function HotelsPage() {
 
     setSearchLoading(true);
 
-    const filtered = hotels.filter((h) => {
-      const name = (h.name || "").toLowerCase();
-      const address = (h.address || "").toLowerCase();
-      const amenities = (h.amenities || []).join(" ").toLowerCase();
-      const priceStr = h.price ? String(h.price) : "";
+    // Add a small delay to make it feel more responsive
+    const timer = setTimeout(() => {
+      const filtered = hotels.filter((h) => {
+        const name = (h.name || "").toLowerCase();
+        const address = (h.address || "").toLowerCase();
+        const amenities = (h.amenities || []).join(" ").toLowerCase();
+        const priceStr = h.price ? String(h.price) : "";
 
-      const matchesNamePrefix = name.startsWith(trimmedInput) || name.includes(trimmedInput);
-      const matchesAddress = address.includes(trimmedInput);
-      const matchesAmenities = amenities.includes(trimmedInput);
-      const matchesPrice = priceStr.includes(trimmedInput);
+        const matchesNamePrefix = name.startsWith(trimmedInput) || name.includes(trimmedInput);
+        const matchesAddress = address.includes(trimmedInput);
+        const matchesAmenities = amenities.includes(trimmedInput);
+        const matchesPrice = priceStr.includes(trimmedInput);
 
-      return matchesNamePrefix || matchesAddress || matchesAmenities || matchesPrice;
-    });
+        return matchesNamePrefix || matchesAddress || matchesAmenities || matchesPrice;
+      });
 
-    setFilteredHotels(filtered);
-    setSearchLoading(false);
+      setFilteredHotels(filtered);
+      setSearchLoading(false);
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [inputValue, hotels]);
 
   const handleFavorite = (hotelId: string) => {
@@ -400,15 +405,6 @@ export default function HotelsPage() {
             </p>
           </div>
           <div className="flex flex-col gap-3 text-xs text-zinc-700 dark:text-zinc-300">
-            <div className="flex items-center gap-2">
-              <Badge className="border-[#8FABD4]/50 bg-[#8FABD4]/15 text-[11px] text-[#4A70A9] dark:border-[#8FABD4]/60 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]">Flexible dates</Badge>
-              <Badge
-                variant="outline"
-                className="border-[#8FABD4]/50 text-[11px] text-[#4A70A9] dark:border-[#8FABD4]/70 dark:text-[#EFECE3]"
-              >
-                No booking fees
-              </Badge>
-            </div>
             <div className="grid gap-2 text-xs sm:grid-cols-2">
               <label className="flex flex-col gap-1">
                 <span className="text-[10px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Check-in</span>
@@ -435,7 +431,7 @@ export default function HotelsPage() {
         </div>
 
         {/* Search bar and View Toggle */}
-        <div className="sticky top-16 z-40 flex items-center gap-3 rounded-2xl bg-transparent shadow-sm backdrop-blur dark:bg-transparent">
+        <div className="sticky top-20 z-40 flex items-center gap-3 rounded-2xl bg-transparent shadow-sm backdrop-blur dark:bg-transparent">
           <div className="relative flex-1 w-1/3">
             <Input
               type="text"
