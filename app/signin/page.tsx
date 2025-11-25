@@ -10,7 +10,7 @@ import { auth } from "@/lib/firebase";
 import { motion } from "framer-motion";
 import { fadeInUp, scaleIn } from "@/lib/animations";
 import Link from "next/link";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function SignInPage() {
@@ -19,6 +19,7 @@ export default function SignInPage() {
   const ADMIN_EMAIL = "admin@gmail.com";
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [showAdminForm, setShowAdminForm] = useState(false);
   const [adminAgreedToTerms, setAdminAgreedToTerms] = useState(false);
   // Support redirecting to intended page after login
@@ -147,13 +148,27 @@ export default function SignInPage() {
                     onChange={(e) => setAdminEmail(e.target.value)}
                     className="w-full px-3 py-2 border rounded bg-white dark:bg-zinc-800 text-black dark:text-white"
                   />
-                  <input
-                    type="password"
-                    placeholder="Password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full px-3 py-2 border rounded bg-white dark:bg-zinc-800 text-black dark:text-white"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      className="w-full pr-10 px-3 py-2 border rounded bg-white dark:bg-zinc-800 text-black dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((p) => !p)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 dark:text-zinc-300 p-1"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-5 h-5" />
+                      ) : (
+                        <Eye className="w-5 h-5" />
+                      )}
+                    </button>
+                  </div>
 
                   <label className="flex items-center gap-2 mt-1">
                     <input
