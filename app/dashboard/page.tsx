@@ -10,7 +10,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CalendarDays, MapPin, User2 } from "lucide-react";
+import { CalendarDays, MapPin, User2, Trash2, Info } from "lucide-react";
+
+// Generic record type for Firestore document data (avoid `any`)
+type DocData = Record<string, unknown>;
+
+// Pending submission shape (minimal, extend as needed)
+interface PendingSubmission {
+  id: string;
+  name?: string;
+  location?: string;
+  price?: number | string;
+  roomsAvailable?: number;
+  createdAt?: string | number | Date;
+  image?: string;
+  latitude?: number;
+  longitude?: number;
+  lat?: number;
+  lon?: number;
+  status?: "pending" | "accepted" | "rejected";
+  accepted?: boolean;
+  rejected?: boolean;
+  submitterEmail?: string;
+}
+import dynamic from "next/dynamic";
+import { useMap } from "react-leaflet";
 import {
   getFirestore,
   collection,
@@ -26,29 +50,32 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
-import dynamic from "next/dynamic";
-import { useMap } from "react-leaflet";
-
-// Dynamic Leaflet imports
 let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
-  const _L = require("leaflet") as any;
-  L = _L;
-  if (_L?.Icon?.Default?.prototype) {
-    try {
-      // some leaflet typings don't expose _getIconUrl; guard at runtime
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      delete _L.Icon.Default.prototype._getIconUrl;
-    } catch (e) {
+  // Dynamically import leaflet on the client to avoid SSR/require usage
+  import("leaflet")
+    .then((_L) => {
+      L = _L as unknown as typeof import("leaflet");
+      try {
+        // some leaflet typings don't expose _getIconUrl; guard at runtime
+        // @ts-ignore
+        delete (_L as any).Icon.Default.prototype._getIconUrl;
+      } catch {
+        // ignore
+      }
+      try {
+        (_L as any).Icon.Default.mergeOptions({
+          iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+          iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+          shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+        });
+      } catch {
+        // ignore
+      }
+    })
+    .catch(() => {
       // ignore
-    }
-    _L.Icon.Default.mergeOptions({
-      iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-      shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
     });
-  }
 }
 const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
@@ -129,6 +156,11 @@ export default function Dashboard() {
 
   const [favorites, setFavorites] = useState<Hotel[]>([]);
   const [loadingFavorites, setLoadingFavorites] = useState(true);
+  const [pendingList, setPendingList] = useState<any[]>([]);
+  const [acceptedHotelIds, setAcceptedHotelIds] = useState<string[]>([]);
+  const [acceptedNameLocationKeys, setAcceptedNameLocationKeys] = useState<string[]>([]);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  const [pendingInfo, setPendingInfo] = useState<any | null>(null);
 
   const [infoBooking, setInfoBooking] = useState<Booking | null>(null);
   const [mapBooking, setMapBooking] = useState<Booking | null>(null);
@@ -143,8 +175,26 @@ export default function Dashboard() {
     totalPrice: number;
   } | null>(null);
   const [cancelConfirmBooking, setCancelConfirmBooking] = useState<Booking | null>(null);
+  const [withdrawConfirmPending, setWithdrawConfirmPending] = useState<any | null>(null);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<any | null>(null);
 
   const db = getFirestore(app);
+
+  // Displayed pending list: prefer current state, but fall back to localStorage
+  // so that items removed from the server (e.g., rejected by admin) remain
+  // visible in the user's Hotel Requests list.
+  const getSavedPending = () => {
+    try {
+      const saved = localStorage.getItem("hotbook_pendingList_v1");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const displayedPending = (pendingList && pendingList.length > 0) ? pendingList : getSavedPending();
 
   // Fetch bookings from Firestore
   useEffect(() => {
@@ -164,13 +214,7 @@ export default function Dashboard() {
       (snapshot) => {
         // DEBUG: print current user email and raw snapshot docs to help diagnose missing bookings
         try {
-          // eslint-disable-next-line no-console
-          console.log("[DEBUG] Dashboard current user:", { email: user?.email, uid: user?.uid });
-          // eslint-disable-next-line no-console
-          console.log(
-            "[DEBUG] Bookings snapshot raw:",
-            snapshot.docs.map((d) => ({ id: d.id, data: d.data() }))
-          );
+          // debug logging removed
         } catch (e) {
           // ignore
         }
@@ -233,6 +277,292 @@ export default function Dashboard() {
     }
     setLoadingFavorites(false);
   }, []);
+
+  // Fetch pending submissions for the current user (from in-memory API)
+  useEffect(() => {
+    if (!user?.email) {
+      setPendingList([]);
+      try {
+        localStorage.removeItem("hotbook_pendingList_v1");
+      } catch (e) {
+        // ignore
+      }
+      return;
+    }
+
+    let mounted = true;
+    // hydrate from localStorage first so items persist across reloads
+    try {
+      const saved = localStorage.getItem("hotbook_pendingList_v1");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) setPendingList(parsed);
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+
+    const fetchPending = async () => {
+      try {
+        const res = await fetch('/api/pending');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!mounted) return;
+        const mine = Array.isArray(data) ? data.filter((i: any) => i.submitterEmail === user.email) : [];
+
+        // Keep all of the user's pending submissions visible in the dashboard.
+        // We still fetch the current hotels and record their ids so the UI can
+        // show an "Accepted" state for any pending submission that was approved
+        // (even if the approved hotel was created with a different id).
+        try {
+          const snap = await getDocs(query(collection(db, "hotels"), orderBy("name", "asc")) as any);
+          if (!mounted) return;
+
+          // Use local variables (not immediate state) when computing accepted
+          // ids/keys so we don't rely on setState being processed synchronously.
+          const ids = snap.docs.map((d) => d.id);
+          const keySet = new Set<string>();
+          snap.docs.forEach((d) => {
+            const dt = d.data() as any;
+            const name = (dt.name || "").toString().trim().toLowerCase();
+            const location = (dt.location || "").toString().trim().toLowerCase();
+            if (name || location) keySet.add(`${name}:::${location}`);
+          });
+
+          // update React state for other consumers, but use the local copies
+          // below to compute statuses immediately.
+          setAcceptedHotelIds(ids);
+          setAcceptedNameLocationKeys(Array.from(keySet));
+
+          // Keep the full pending list. Merge server-provided results with any
+          // locally-known submissions so approved/rejected items are not
+          // removed from the user's view even if the server stops returning
+          // them. This preserves the requested UX: submissions remain in the
+          // pending list and simply change their status to 'Accepted'/'Rejected'.
+          // Always include locally-saved pending items so server-side deletes
+          // (e.g. admin rejection) don't cause the user's copy to vanish.
+          const savedPending = (() => {
+            try {
+              const raw = localStorage.getItem('hotbook_pendingList_v1');
+              if (!raw) return [];
+              const parsed = JSON.parse(raw);
+              return Array.isArray(parsed) ? parsed : [];
+            } catch {
+              return [];
+            }
+          })();
+
+          const existing = Array.isArray(pendingList) ? pendingList : [];
+          const merged = (() => {
+            const map = new Map<string, any>();
+            // seed with locally-saved items first (preserve user copy)
+            for (const pItem of savedPending) map.set(String(pItem.id), { ...pItem });
+            // then include current in-memory items
+            for (const pItem of existing) map.set(String(pItem.id), { ...pItem });
+            // finally include server-provided items (they override local copies)
+            for (const sItem of (mine || [])) map.set(String(sItem.id), { ...sItem });
+            return Array.from(map.values());
+          })();
+
+          // Determine statuses using our local arrays (ids, keyArray)
+          const keyArray = Array.from(keySet);
+          const mineIds = new Set((mine || []).map((x: any) => String(x.id)));
+          const updated = merged.map((item: any) => {
+            const idStr = String(item.id);
+            const nameKey = `${(item.name||"").toString().trim().toLowerCase()}:::${(item.location||"").toString().trim().toLowerCase()}`;
+            const isAcceptedByKey = keyArray.includes(nameKey);
+            if (ids.includes(idStr) || isAcceptedByKey || item.status === 'accepted' || item.accepted === true) {
+              item.status = 'accepted';
+            } else if (!mineIds.has(idStr)) {
+              // server no longer returns it and it's not accepted => rejected
+              item.status = 'rejected';
+            } else {
+              item.status = item.status || 'pending';
+            }
+            return item;
+          });
+
+          setPendingList(updated);
+          try {
+            // persist the updated list (with computed statuses)
+            localStorage.setItem("hotbook_pendingList_v1", JSON.stringify(updated));
+          } catch (e) {
+            // ignore storage errors
+          }
+        } catch (err) {
+          console.warn('Failed to fetch hotels for accepted check', err);
+          // If we can't fetch hotels, still show the raw pending list.
+          // Merge with previous items so we don't remove submissions
+          // that the server may have stopped returning after approval.
+          setAcceptedHotelIds([]);
+          const existing = pendingList || [];
+          const merged = (() => {
+            const map = new Map<string, any>();
+            for (const pItem of existing) map.set(String(pItem.id), { ...pItem });
+            for (const sItem of (mine || [])) map.set(String(sItem.id), { ...sItem });
+            return Array.from(map.values());
+          })();
+
+          const mineIds = new Set((mine || []).map((x: any) => String(x.id)));
+          const updated = merged.map((item: any) => {
+            const idStr = String(item.id);
+            const nameKey = `${(item.name||"").toString().trim().toLowerCase()}:::${(item.location||"").toString().trim().toLowerCase()}`;
+            const isAcceptedByKey = acceptedNameLocationKeys.includes(nameKey);
+            if (acceptedHotelIds.includes(idStr) || isAcceptedByKey || item.status === 'accepted' || item.accepted === true) {
+              item.status = 'accepted';
+            } else if (!mineIds.has(idStr)) {
+              item.status = 'rejected';
+            } else {
+              item.status = item.status || 'pending';
+            }
+            return item;
+          });
+
+          setPendingList(updated);
+          try {
+            localStorage.setItem("hotbook_pendingList_v1", JSON.stringify(updated));
+          } catch (e) {
+            // ignore
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch pending items', err);
+      }
+    };
+
+    fetchPending();
+    const onPendingWithDetail = (ev: Event) => {
+      // New pending or hotel added: re-fetch to pick up new approvals.
+      fetchPending();
+    };
+
+    // Immediate event handler: mark a specific pending item as updated/removed
+    // so the dashboard reflects a 'rejected' state instantly without waiting
+    // for the fetch. This keeps the user's submission visible and changes the
+    // status to the provided status (default 'rejected').
+    const onPendingEventImmediate = (ev: Event) => {
+      try {
+        const detail = (ev as any)?.detail || {};
+        const id = detail && detail.id ? String(detail.id) : null;
+        const status = detail && detail.status ? String(detail.status) : 'rejected';
+        if (!id) return;
+
+        setPendingList((prev: any[]) => {
+          const prevArr = Array.isArray(prev) ? prev.slice() : [];
+          let found = false;
+          const updated = prevArr.map((item) => {
+            if (String(item.id) === id) {
+              found = true;
+              return { ...item, status, rejected: status === 'rejected', accepted: status === 'accepted' };
+            }
+            return item;
+          });
+
+          if (!found) {
+            // Try to restore from localStorage if available, otherwise create
+            // a minimal placeholder so the user still sees the rejected item.
+            try {
+              const saved = JSON.parse(localStorage.getItem('hotbook_pendingList_v1') || '[]');
+              const existing = Array.isArray(saved) ? saved.find((s: any) => String(s.id) === id) : null;
+              if (existing) {
+                existing.status = status;
+                existing.rejected = status === 'rejected';
+                existing.accepted = status === 'accepted';
+                updated.push(existing);
+              } else {
+                updated.push({ id, status, rejected: status === 'rejected' });
+              }
+            } catch (e) {
+              updated.push({ id, status, rejected: status === 'rejected' });
+            }
+          }
+
+          try { localStorage.setItem('hotbook_pendingList_v1', JSON.stringify(updated)); } catch (e) {}
+          return updated;
+        });
+      } catch (e) {
+        // ignore
+      } finally {
+        // still re-fetch in the background to reconcile with server
+        fetchPending();
+      }
+    };
+
+    window.addEventListener('hotbook:pending-hotel-added', onPendingWithDetail);
+    window.addEventListener('hotbook:hotel-added', onPendingWithDetail);
+    window.addEventListener('hotbook:pending-hotel-removed', onPendingEventImmediate);
+    window.addEventListener('hotbook:pending-hotel-updated', onPendingEventImmediate);
+
+    // Also watch the hotels collection so approvals made from other browsers/clients
+    // will cause this client to refresh pending items.
+    let hotelsUnsub: (() => void) | null = null;
+    try {
+      const hotelsCol = collection(db, "hotels");
+      hotelsUnsub = onSnapshot(hotelsCol, () => {
+        fetchPending();
+      });
+    } catch (err) {
+      // ignore snapshot errors (permissions etc.)
+      console.warn('Failed to subscribe to hotels snapshot:', err);
+    }
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('hotbook:pending-hotel-added', onPendingWithDetail);
+      window.removeEventListener('hotbook:hotel-added', onPendingWithDetail);
+      window.removeEventListener('hotbook:pending-hotel-removed', onPendingWithDetail);
+      window.removeEventListener('hotbook:pending-hotel-updated', onPendingWithDetail);
+      if (hotelsUnsub) hotelsUnsub();
+    };
+  }, [user?.email]);
+
+  // Fetch hotels that were approved/published and are associated with this user
+  useEffect(() => {
+    let mounted = true;
+    const fetchApproved = async () => {
+      if (!user?.email) {
+        setApprovedHotels([]);
+        setLoadingApproved(false);
+        return;
+      }
+      setLoadingApproved(true);
+      try {
+        const snap = await getDocs(collection(db, "hotels"));
+        if (!mounted) return;
+        const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+        // Select hotels that were actually created/submitted by this user.
+        // We include hotels where `submitterEmail` matches the current user
+        // and hotels that reference a pending id belonging to this user.
+        const mine = all.filter((h: any) => {
+          const submitter = (h.submitterEmail || "").toString().toLowerCase();
+          if (submitter && user?.email && submitter === user.email.toLowerCase()) return true;
+
+          // also consider the hotels that reference pending ids belonging to this user
+          const pendingIds = [h.pendingId, h.originalPendingId, h.sourcePendingId, h.pendingSubmissionId, h.pending_id];
+          for (const pid of pendingIds) {
+            if (pid && pendingList.some((p) => String(p.id) === String(pid))) return true;
+          }
+
+          // Do NOT attempt a loose name/location fallback here — that may
+          // incorrectly match hotels created by other users. Only include
+          // hotels that explicitly reference this user's email or a pending
+          // submission id we control.
+          return false;
+        });
+
+        setApprovedHotels(mine as Hotel[]);
+      } catch (err) {
+        console.warn('Failed to fetch approved hotels', err);
+        setApprovedHotels([]);
+      } finally {
+        if (mounted) setLoadingApproved(false);
+      }
+    };
+
+    fetchApproved();
+    // re-run when pendingList or acceptedNameLocationKeys change
+    return () => { mounted = false; };
+  }, [user?.email, pendingList, acceptedNameLocationKeys, db]);
 
   const removeFavorite = (hotelId: string) => {
     const updated = favorites.filter((h) => h.id !== hotelId);
@@ -306,6 +636,70 @@ export default function Dashboard() {
     return Math.round(pricePerNight * nights);
   };
 
+  // Withdraw pending submission (called from confirmation modal)
+  const withdrawPending = async (p: any) => {
+    if (!p) return;
+    let deletedLocally = false;
+    try {
+      const res = await fetch(`/api/pending/${p.id}`, { method: 'DELETE' });
+      // treat 404 (already removed) as OK — proceed with cleanup
+      if (res.ok || res.status === 404) {
+        deletedLocally = true;
+      } else {
+        console.warn('Pending DELETE returned non-ok status', res.status);
+      }
+    } catch (err) {
+      console.warn('Pending DELETE request failed', err);
+    }
+
+    // Instead of removing the pending item from the UI, mark it as rejected
+    // so the user still sees their submission but with an updated status.
+    if (deletedLocally) {
+      setPendingList((prev) => {
+        const updated = (prev || []).map((x) => {
+          if (String(x.id) === String(p.id)) {
+            return { ...x, status: 'rejected', rejected: true };
+          }
+          return x;
+        });
+        try { localStorage.setItem("hotbook_pendingList_v1", JSON.stringify(updated)); } catch (e) {}
+        return updated;
+      });
+    }
+
+      // Server-side: ensure pending entries are cleaned up
+      try {
+        await fetch(`/api/pending/ensure-delete`, {
+          method: 'POST',
+          body: JSON.stringify({ id: p.id, name: p.name, location: p.location }),
+          headers: { 'content-type': 'application/json' },
+        });
+      } catch (e) {
+        console.warn('ensure-delete request failed', e);
+      }
+
+      // NOTE: we intentionally do NOT delete any published hotel documents
+      // from Firestore when a user withdraws their pending submission from
+      // their dashboard. Removing published hotel entries should be an
+      // administrative action. Here we only remove/mark the user's local
+      // pending copy and call the ensure-delete API which performs safe
+      // server-side cleanup as appropriate.
+
+      // notify other clients that the pending item was updated (withdrawn)
+      try {
+        window.dispatchEvent(new CustomEvent('hotbook:pending-hotel-updated', { detail: { id: p.id, status: 'rejected' } }));
+      } catch (e) {
+        // ignore
+      }
+  };
+
+  // NOTE: the previous `deleteAccepted` helper (which removed published
+  // hotel documents from Firestore) has been intentionally removed to
+  // prevent users from accidentally deleting approved/published hotel
+  // entries. Published hotel deletion should be an administrative
+  // operation. Use `withdrawPending` to withdraw the user's submission
+  // from their dashboard without removing public records.
+
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -361,18 +755,112 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card className="col-span-2 border-none bg-[#4A70A9]/10 px-3 py-3 shadow-none dark:bg-[#4A70A9]/35 md:col-span-1">
-              <CardHeader className="p-0 pb-1">
-                <CardTitle className="text-[11px] font-medium text-[#4A70A9] dark:text-[#EFECE3]">
-                  Saved hotels
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 text-[20px] font-semibold text-[#4A70A9] dark:text-[#EFECE3]">
-                {favorites.length}
-              </CardContent>
-            </Card>
+              <div className="col-span-2 md:col-span-1 flex flex-col gap-3">
+              <Card className="border-none bg-[#4A70A9]/10 px-3 py-3 shadow-none dark:bg-[#4A70A9]/35">
+                <CardHeader className="p-0 pb-1">
+                  <CardTitle className="text-[11px] font-medium text-[#4A70A9] dark:text-[#EFECE3]">
+                    Saved hotels
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 text-[20px] font-semibold text-[#4A70A9] dark:text-[#EFECE3]">
+                  {favorites.length}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </motion.div>
+
+        {/* Hotel requests dialog for user's submissions */}
+        <Dialog open={pendingDialogOpen} onOpenChange={() => setPendingDialogOpen(false)}>
+          <DialogContent className="w-[90vw] max-w-2xl p-4">
+            <DialogHeader>
+              <DialogTitle>Your hotel requests</DialogTitle>
+            </DialogHeader>
+            {pendingList.length === 0 ? (
+              <p className="text-sm text-zinc-600">You have no hotel requests.</p>
+            ) : (
+              <div className="grid gap-3">
+                {pendingList.map((p) => (
+                  <Card key={p.id}>
+                    <CardContent className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold">{p.name}</p>
+                        <p className="text-sm text-zinc-600">{p.location}</p>
+                        <p className="text-xs text-zinc-500">Submitted: {p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</p>
+                      </div>
+                      <div className="text-right text-sm">
+                        <div>{typeof p.price === 'number' ? `₱${p.price.toLocaleString()}` : (p.price ? `₱${p.price}` : 'N/A')}</div>
+                        <div className="text-xs text-zinc-500">Rooms: {p.roomsAvailable ?? 'N/A'}</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Hotel Request Info Modal */}
+        <Dialog open={!!pendingInfo} onOpenChange={() => setPendingInfo(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{pendingInfo?.name || 'Hotel request'}</DialogTitle>
+            </DialogHeader>
+
+            {pendingInfo && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-1">
+                  <div className="h-40 w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                    {pendingInfo.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={pendingInfo.image} alt={pendingInfo.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="text-sm text-zinc-500">No image available</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="md:col-span-2 space-y-3">
+                  <p className="text-sm text-zinc-500">Location</p>
+                  <p className="font-medium">{pendingInfo.location}</p>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <p className="text-sm text-zinc-500">Price</p>
+                      <p className="font-medium">{typeof pendingInfo.price === 'number' ? `₱${pendingInfo.price.toLocaleString()}` : (pendingInfo.price ? `₱${pendingInfo.price}` : 'N/A')}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-zinc-500">Rooms</p>
+                      <p className="font-medium">{pendingInfo.roomsAvailable ?? 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-zinc-500">Submitted</p>
+                      <p className="font-medium">{pendingInfo.createdAt ? new Date(pendingInfo.createdAt).toLocaleString() : '—'}</p>
+                    </div>
+                  </div>
+
+                  {pendingInfo.amenities && pendingInfo.amenities.length > 0 && (
+                    <div>
+                      <p className="text-sm text-zinc-500 mb-2">Amenities</p>
+                      <div className="flex flex-wrap gap-2">
+                        {pendingInfo.amenities.map((a: string, i: number) => (
+                          <Badge key={i}>{a}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {pendingInfo.description && (
+                    <div>
+                      <p className="text-sm text-zinc-500 mb-1">Description</p>
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300">{pendingInfo.description}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Tabs */}
         <motion.div initial="initial" animate="animate" variants={fadeInUp} transition={{ delay: 0.1 }}>
@@ -390,13 +878,16 @@ export default function Dashboard() {
                   rounded-full text-sm font-medium transition-all duration-300">
                 Saved Hotels
               </TabsTrigger>
-              <TabsTrigger value="profile" className="w-full h-full flex items-center justify-center text-center
+              
+              <TabsTrigger value="pending" className="w-full h-full flex items-center justify-center text-center
                   data-[state=active]:bg-white data-[state=active]:text-[#000000]
                   dark:data-[state=active]:bg-zinc-800 dark:data-[state=active]:text-white
                   rounded-full text-sm font-medium transition-all duration-300">
-                Profile
+                Hotel Requests
               </TabsTrigger>
             </TabsList>
+
+            
 
             {/* Bookings Tab */}
             <TabsContent value="bookings" className="space-y-4">
@@ -558,10 +1049,9 @@ export default function Dashboard() {
                             {hotel.location}
                           </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-2">
-                          {hotel.description && (
-                            <p className="text-xs text-zinc-600 dark:text-zinc-400">{hotel.description}</p>
-                          )}
+                        <CardContent className="space-y-4">
+                          <p className="text-sm text-zinc-600">{hotel.description || ''}</p>
+
                           {hotel.amenities && hotel.amenities.length > 0 && (
                             <div className="flex flex-wrap gap-1.5">
                               {hotel.amenities.map((amenity, idx) => (
@@ -571,6 +1061,7 @@ export default function Dashboard() {
                               ))}
                             </div>
                           )}
+
                           <p className="text-xs text-zinc-600 dark:text-zinc-400">
                             {hotel.price
                               ? `₱${hotel.price.toLocaleString()} per night`
@@ -580,7 +1071,6 @@ export default function Dashboard() {
                             <button
                               onClick={() => {
                                 if (hotel.latitude && hotel.longitude) {
-                                  const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?lat=${hotel.latitude}&lon=${hotel.longitude}&format=json`;
                                   setMapBooking({
                                     id: hotel.id,
                                     hotelName: hotel.name,
@@ -609,8 +1099,6 @@ export default function Dashboard() {
                               </button>
                               <button
                                 onClick={() => {
-                                  // Navigate to booking page with hotel details
-                                  // For now, just alert
                                   alert(`Book ${hotel.name} - Feature coming soon`);
                                 }}
                                 className="rounded-full bg-[#4A70A9] px-4 py-1 text-[11px] font-medium text-white hover:bg-[#4A70A9]/90"
@@ -627,36 +1115,114 @@ export default function Dashboard() {
               )}
             </TabsContent>
 
-            {/* Profile Tab */}
-            <TabsContent value="profile" className="space-y-4">
+            {/* Hotel Requests Tab (replaces Profile) */}
+            <TabsContent value="pending" className="space-y-4">
               <motion.div initial="initial" animate="animate" variants={fadeInUp}>
-                <Card className="border border-black">
+                <Card className="border border-transparent">
                   <CardHeader>
-                    <CardTitle>Profile Information</CardTitle>
-                    <CardDescription>Your account details</CardDescription>
+                    <CardTitle>My Hotel Requests</CardTitle>
+                    <CardDescription>Hotel requests you submitted that are awaiting admin verification</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-6">
-                    {user.photoURL && (
-                      <img src={user.photoURL} alt="Profile" className="w-16 h-16 rounded-full" />
-                    )}
-                    <div>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400">Display Name</p>
-                      <p className="text-lg font-semibold text-black dark:text-white">{user.displayName || "Not set"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400">Email Address</p>
-                      <p className="text-base font-medium text-black dark:text-white">{user.email}</p>
-                    </div>
-                    {user.phoneNumber && (
-                      <div>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400">Phone Number</p>
-                        <p className="text-base font-medium text-black dark:text-white">{user.phoneNumber}</p>
+                  <CardContent className="space-y-4">
+                    {displayedPending.length === 0 ? (
+                      <p className="text-sm text-zinc-600">You have no hotel requests.</p>
+                    ) : (
+                      <div className="grid gap-3">
+                        {displayedPending.map((p: any) => {
+                          const lat = p.latitude ?? p.lat ?? p.latitude;
+                          const lon = p.longitude ?? p.lon ?? p.longitude;
+                            return (
+                            <Card key={p.id}>
+                              <CardContent className="flex items-center justify-between">
+                                <div className="flex-1">
+                                  <p className="font-semibold">{p.name}</p>
+                                  <p className="text-sm text-zinc-600">{p.location}</p>
+                                  <p className="text-xs text-zinc-500">Submitted: {p.createdAt ? new Date(p.createdAt).toLocaleString() : '—'}</p>
+                                </div>
+
+                                <div className="mx-4 flex items-center justify-center min-w-24">
+                                  {((p && (p.status === 'rejected' || p.rejected === true)) ) ? (
+                                    <span className="text-rose-600 font-semibold text-sm">Rejected</span>
+                                  ) : (() => {
+                                    const nameKey = `${(p.name||"").toString().trim().toLowerCase()}:::${(p.location||"").toString().trim().toLowerCase()}`;
+                                    const isAcceptedByKey = acceptedNameLocationKeys.includes(nameKey);
+                                    const isAcceptedFlag = p && (p.status === 'accepted' || p.accepted === true);
+                                    if (acceptedHotelIds.includes(String(p.id)) || isAcceptedByKey || isAcceptedFlag) {
+                                      return <span className="text-green-600 font-semibold text-sm">Approved</span>;
+                                    }
+                                    return <span className="text-amber-600 font-semibold text-sm">Pending</span>;
+                                  })()}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    aria-label="Delete submission"
+                                    title="Delete submission"
+                                    className="text-zinc-400 hover:text-red-600 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30"
+                                    onClick={() => setDeleteConfirmItem(p)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    aria-label="View Map"
+                                    title="View Map"
+                                    className="p-2"
+                                    onClick={async () => {
+                                      const bookingLike = {
+                                        id: p.id,
+                                        hotelName: p.name,
+                                        hotelLocation: p.location,
+                                        checkInDate: new Date().toISOString().split("T")[0],
+                                        checkOutDate: new Date(Date.now() + 86400000).toISOString().split("T")[0],
+                                        guests: 1,
+                                        totalPrice: p.price || 0,
+                                        hotelImage: p.image || p.photo || undefined,
+                                        lat: lat,
+                                        lon: lon,
+                                      } as Booking;
+                                      setMapBooking(bookingLike);
+                                      if (lat && lon) {
+                                        setMapCoords({ lat: Number(lat), lon: Number(lon) });
+                                        setMapAddress(p.location || "");
+                                      } else {
+                                        try {
+                                          const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+                                            p.location || ""
+                                          )}`);
+                                          const data = await res.json();
+                                          if (data.length > 0) {
+                                            const la = parseFloat(data[0].lat);
+                                            const lo = parseFloat(data[0].lon);
+                                            setMapCoords({ lat: la, lon: lo });
+                                            setMapAddress(await getExactAddress(la, lo));
+                                          } else {
+                                            setMapCoords(null);
+                                            setMapAddress(p.location || "");
+                                          }
+                                        } catch (err) {
+                                          console.warn('Geocode failed', err);
+                                          setMapCoords(null);
+                                          setMapAddress(p.location || "");
+                                        }
+                                      }
+                                    }}
+                                  >
+                                    <MapPin className="h-4 w-4" />
+                                  </Button>
+
+                                  <Button size="sm" variant="outline" aria-label="Info" title="Info" className="p-2" onClick={() => setPendingInfo(p)}>
+                                    <Info className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
                       </div>
                     )}
-                    <div>
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400">Account Status</p>
-                      <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Active</Badge>
-                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -973,6 +1539,108 @@ export default function Dashboard() {
                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
                   >
                     Confirm Cancel
+                  </button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+        {/* Withdraw Pending Confirmation Modal */}
+        {withdrawConfirmPending && (
+          <Dialog open={!!withdrawConfirmPending} onOpenChange={() => setWithdrawConfirmPending(null)}>
+            <DialogContent className="max-w-md" showCloseButton={false}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold">Withdraw Submission?</h3>
+                </div>
+                <button
+                  onClick={() => setWithdrawConfirmPending(null)}
+                  aria-label="Close confirmation"
+                  className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <p className="text-zinc-600 dark:text-zinc-400">
+                  Are you sure you want to withdraw your pending submission for <strong>{withdrawConfirmPending?.name}</strong>?
+                </p>
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  This will remove the pending submission and attempt to delete any published hotel created from it.
+                </p>
+
+                <div className="flex justify-end gap-2 pt-4">
+                  <button
+                    onClick={() => setWithdrawConfirmPending(null)}
+                    className="px-4 py-2 border border-gray-300 dark:border-zinc-600 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 transition"
+                  >
+                    Keep Submission
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await withdrawPending(withdrawConfirmPending);
+                      setWithdrawConfirmPending(null);
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                  >
+                    Confirm Withdraw
+                  </button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+        {/* Delete/Withdraw Confirmation Modal (used by top-right 'x') */}
+        {deleteConfirmItem && (
+          <Dialog open={!!deleteConfirmItem} onOpenChange={() => setDeleteConfirmItem(null)}>
+            <DialogContent className="max-w-md" showCloseButton={false}>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold">Delete Submission?</h3>
+                </div>
+                <button
+                  onClick={() => setDeleteConfirmItem(null)}
+                  aria-label="Close confirmation"
+                  className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <p className="text-zinc-600 dark:text-zinc-400">
+                  Are you sure you want to permanently delete <strong>{deleteConfirmItem?.name}</strong>? This action cannot be undone.
+                </p>
+
+                <div className="flex justify-end gap-2 pt-4">
+                  <button
+                    onClick={() => setDeleteConfirmItem(null)}
+                    className="px-4 py-2 border border-gray-300 dark:border-zinc-600 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 transition"
+                  >
+                    Keep
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const p = deleteConfirmItem;
+                        if (!p) return;
+
+                        // Always treat deletion from the user's requests list as a
+                        // withdrawal of the submission. We will not delete public
+                        // published hotel documents here to avoid accidental
+                        // permanent removals. The server-side `ensure-delete`
+                        // endpoint can decide what cleanup to perform safely.
+                        await withdrawPending(p);
+                      } catch (err) {
+                        console.error('Delete failed', err);
+                      } finally {
+                        setDeleteConfirmItem(null);
+                      }
+                    }}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+                  >
+                    Confirm Delete
                   </button>
                 </div>
               </div>

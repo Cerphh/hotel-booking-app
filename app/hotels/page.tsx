@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import AddHotelForm from "@/components/add-hotel-form";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { redirect } from "next/navigation";
@@ -22,6 +24,9 @@ import {
   doc,
   getDoc,
   setDoc,
+  getDocs,
+  orderBy,
+  deleteDoc,
   DocumentData,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
@@ -139,6 +144,7 @@ function AutoFitMap({ hotel }: { hotel: Hotel }) {
 export default function HotelsPage() {
   const { user } = useAuth();
   const [mounted, setMounted] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [filteredHotels, setFilteredHotels] = useState<Hotel[]>([]);
@@ -242,7 +248,6 @@ export default function HotelsPage() {
               })()
             );
           }
-
           list.push(hotel);
         });
 
@@ -376,6 +381,8 @@ export default function HotelsPage() {
     );
   };
 
+  // Add-hotel dialog open state handled by `addOpen` and `setAddOpen`.
+
   if (!mounted) return null;
 
   return (
@@ -469,6 +476,21 @@ export default function HotelsPage() {
             >
               🗺️ Map
             </Button>
+            {/* Add Hotel (submissions go to pending_hotels) */}
+            <Dialog open={addOpen} onOpenChange={setAddOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="rounded-full px-4 py-2 text-xs font-medium">Add Hotel</Button>
+              </DialogTrigger>
+              <DialogContent className="w-96 p-4">
+                <DialogHeader>
+                  <DialogTitle>Add Hotel</DialogTitle>
+                </DialogHeader>
+
+                <div>
+                  <AddHotelForm />
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 

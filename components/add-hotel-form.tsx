@@ -1,29 +1,29 @@
 "use client";
 
 import React, { useState, useRef } from "react";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "./ui/button";
 import { DialogClose } from "@/components/ui/dialog";
 import MapDialogWrapper from "./map-dialog-wrapper";
 import { MapPin } from "lucide-react";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
-import app from "@/lib/firebase";
 
 interface Props {}
 
 export default function AddHotelForm(_: Props) {
+  const { user } = useAuth();
   const [name, setName] = useState("");
   const [location, setLocation] = useState("");
   const [price, setPrice] = useState<number | "">("");
   const [roomsAvailable, setRoomsAvailable] = useState<number | "">("");
   const [image, setImage] = useState("");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [amenities, setAmenities] = useState("");
   const [loading, setLoading] = useState(false);
   const [pinLoading, setPinLoading] = useState(false);
   const [geocodedCoords, setGeocodedCoords] = useState<{ lat: number; lon: number } | null>(null);
 
   const closeRef = useRef<HTMLButtonElement | null>(null);
-
-  const db = getFirestore(app);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,18 +40,31 @@ export default function AddHotelForm(_: Props) {
         image: image || "",
         amenities: amenities ? amenities.split(",").map((s) => s.trim()) : [],
         createdAt: new Date().toISOString(),
+        ...(user?.email ? { submitterEmail: user.email } : {}),
       } as const;
 
-      const ref = await addDoc(collection(db, "hotels"), payload as any);
-
-      // Notify other parts of the app to refresh the hotels list
+      // Submit to the in-memory pending API (not persisted to Firestore)
       try {
-        window.dispatchEvent(new CustomEvent("hotbook:hotel-added", { detail: { id: ref.id } }));
-      } catch {
-        // ignore
-      }
+        const res = await fetch(`/api/pending`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const created = await res.json();
 
-      alert("Hotel added successfully");
+        // Notify admin UI that a pending hotel was added
+        try {
+          window.dispatchEvent(new CustomEvent("hotbook:pending-hotel-added", { detail: { id: created.id } }));
+        } catch {
+          // ignore
+        }
+
+        alert("Hotel submitted for review. An admin will verify it before it appears in the public list.");
+      } catch (err) {
+        console.error("Failed to submit pending hotel:", err);
+        alert("Failed to submit pending hotel. See console for details.");
+      }
       // Close dialog by clicking the DialogClose button
       if (closeRef.current) closeRef.current.click();
 
@@ -153,12 +166,65 @@ export default function AddHotelForm(_: Props) {
           onChange={(e) => setRoomsAvailable(e.target.value === "" ? "" : Number(e.target.value))}
           className="w-full px-3 py-2 border rounded"
         />
-      <input
-        placeholder="Image URL"
-        value={image}
-        onChange={(e) => setImage(e.target.value)}
-        className="w-full px-3 py-2 border rounded"
-      />
+      <div className="flex items-center gap-2">
+        <input
+          placeholder="Image URL"
+          value={image}
+          onChange={(e) => {
+            setImage(e.target.value);
+            setImagePreview(e.target.value || null);
+          }}
+          className="flex-1 px-3 py-2 border rounded"
+        />
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (!/^image\/(jpeg|jpg|png)$/.test(f.type)) {
+                alert('Please upload a JPG or PNG image.');
+                return;
+              }
+              const maxSize = 5 * 1024 * 1024; // 5MB
+              if (f.size > maxSize) {
+                alert('Please upload an image smaller than 5 MB.');
+                return;
+              }
+
+              // Read file as data URL and set as image URL (preview)
+              const reader = new FileReader();
+              reader.onload = () => {
+                const result = reader.result as string | ArrayBuffer | null;
+                if (typeof result === 'string') {
+                  setImage(result);
+                  setImagePreview(result);
+                }
+              };
+              reader.readAsDataURL(f);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-2 bg-[#EFECE3] rounded border text-sm hover:bg-[#E0DCCF]"
+          >
+            Upload
+          </button>
+        </div>
+      </div>
+      {imagePreview && (
+        <div className="mt-2">
+          <p className="text-xs text-zinc-600 mb-1">Preview</p>
+          <div className="h-28 w-28 overflow-hidden rounded border bg-zinc-50">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imagePreview} alt="preview" className="h-full w-full object-cover" />
+          </div>
+        </div>
+      )}
       <input
         placeholder="Amenities (comma separated)"
         value={amenities}

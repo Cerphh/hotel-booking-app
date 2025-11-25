@@ -15,8 +15,7 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 import { useState } from "react";
 import { usePathname } from "next/navigation"; // <-- to detect current page
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import AddHotelForm from "./add-hotel-form";
+// dialog and AddHotelForm removed — navbar no longer shows pending dialog
 
 export function Navbar() {
   const { user, logout } = useAuth();
@@ -83,6 +82,8 @@ export function Navbar() {
                 );
               })}
           </div>
+
+          {/* pending UI removed from navbar */}
 
           {/* User Menu / Auth Buttons */}
           <div className="flex items-center space-x-2">

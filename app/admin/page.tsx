@@ -4,12 +4,12 @@ import { useAuth } from "@/lib/auth-context";
 // redirect not used here; admin access handled locally
 import { useEffect, useState, useCallback } from "react";
 import React from "react";
-import { getFirestore, collection, getDocs, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, collectionGroup, getDocs, getCountFromServer, query, orderBy, doc, setDoc } from "firebase/firestore";
 import app from "@/lib/firebase";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import AddHotelForm from "@/components/add-hotel-form";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import HotelInfo from "@/components/hotel-info";
 import { Info, MapPin } from "lucide-react";
 // Add-hotel menu moved to the user menu in the navbar
@@ -62,8 +62,9 @@ export default function AdminPage() {
   const [hotels, setHotels] = useState<HotelItem[]>([]);
   const [loadingHotels, setLoadingHotels] = useState(true);
   const [totalHotels, setTotalHotels] = useState<number | null>(null);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(true);
   const [totalBookings, setTotalBookings] = useState<number | null>(null);
-  const [totalUsers, setTotalUsers] = useState<number | null>(null);
   
   // form state removed — add hotel UI moved into the navbar dialog
 
@@ -72,9 +73,121 @@ export default function AdminPage() {
   const ADMIN_PASSWORD = typeof process !== "undefined" ? (process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin") : "admin";
   const [adminEmailInput, setAdminEmailInput] = useState("");
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
-  const [adminSignedIn, setAdminSignedIn] = useState<boolean>(false);
+  const [adminSignedIn, setAdminSignedIn] = useState<boolean>(() => {
+    try {
+      return (typeof window !== 'undefined' && localStorage.getItem("hotbook_admin_signed_in") === "true") || false;
+    } catch {
+      return false;
+    }
+  });
 
   const db = getFirestore(app);
+
+  const [showHotels, setShowHotels] = useState(false);
+  const [showBookings, setShowBookings] = useState(false);
+
+  // Small presentational donut that displays a centered count.
+  const Donut = ({
+    count,
+    label = "",
+    onActivate,
+  }: {
+    count: number | null;
+    label?: string;
+    onActivate?: () => void;
+  }) => {
+    const size = 140;
+    const stroke = 16;
+    const radius = (size - stroke) / 2;
+    const circumference = 2 * Math.PI * radius;
+    // Decorative full ring for now; progress can be used later.
+    const progress = 100;
+    const dashoffset = circumference - (progress / 100) * circumference;
+
+    const interactive = typeof onActivate === "function";
+
+    return (
+      <div
+        className={`relative w-[140px] h-[140px] mx-auto ${interactive ? 'cursor-pointer' : ''}`}
+        {...(interactive
+          ? {
+              role: 'button',
+              tabIndex: 0,
+              onClick: onActivate,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onActivate();
+                }
+              },
+            }
+          : {})}
+      >
+        <div className="absolute -top-7 left-1/2 transform -translate-x-1/2 text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{label}</div>
+
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block" aria-hidden>
+          <defs>
+            <linearGradient id="donutGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#7c3aed" />
+              <stop offset="100%" stopColor="#06b6d4" />
+            </linearGradient>
+          </defs>
+          <g transform={`translate(${size / 2}, ${size / 2})`}>
+            <circle r={radius} fill="none" strokeWidth={stroke} stroke="#eef2ff" />
+            <circle
+              r={radius}
+              fill="none"
+              strokeWidth={stroke}
+              stroke="url(#donutGradient)"
+              strokeLinecap="round"
+              strokeDasharray={`${circumference} ${circumference}`}
+              strokeDashoffset={dashoffset}
+              transform={`rotate(-90)`}
+            />
+          </g>
+        </svg>
+
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">{count ?? '—'}</div>
+        </div>
+      </div>
+    );
+  };
+
+  // fetch bookings count efficiently and provide a separate loader for the list
+  const fetchBookingsCount = useCallback(async () => {
+    try {
+      // Try server-side aggregation first to avoid downloading all booking docs
+      try {
+        const agg = await getCountFromServer(query(collectionGroup(db, "bookings")));
+        const count = agg.data().count ?? 0;
+        setTotalBookings(Number(count));
+        return;
+      } catch (e) {
+        console.warn("getCountFromServer failed for bookings, falling back to getDocs:", e);
+      }
+
+      const snap = await getDocs(collectionGroup(db, "bookings"));
+      setTotalBookings(snap.size);
+    } catch (err) {
+      console.error("Failed to fetch bookings count:", err);
+      setTotalBookings(null);
+    }
+  }, [db]);
+
+  const fetchBookingsList = useCallback(async () => {
+    try {
+      setLoadingBookings(true);
+      const snap = await getDocs(query(collectionGroup(db, "bookings")));
+      const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      setBookings(data);
+    } catch (err) {
+      console.error("Failed to fetch bookings list:", err);
+      setBookings([]);
+    } finally {
+      setLoadingBookings(false);
+    }
+  }, [db]);
 
   // fetch helper moved out so we can call it from event listener
   const fetchHotels = useCallback(async () => {
@@ -93,60 +206,213 @@ export default function AdminPage() {
     }
   }, [db]);
 
-  // fetch counts for bookings and users (admin-only)
-  const fetchCounts = useCallback(async () => {
-    // Use a simple, safe fallback approach on the client: count documents with getDocs.
+  const fetchPendingHotels = useCallback(async () => {
     try {
-      const bookingsSnap = await getDocs(collection(db, "bookings"));
-      setTotalBookings(bookingsSnap.size);
-    } catch (err) {
-      console.warn("Failed to fetch bookings count:", err);
-      setTotalBookings(null);
-    }
+      setLoadingPending(true);
+      // Fetch pending items from in-memory API
+      const res = await fetch("/api/pending");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: HotelItem[] = await res.json();
 
-    try {
-      const usersSnap = await getDocs(collection(db, "users"));
-      setTotalUsers(usersSnap.size);
+      // Also filter out any pending items that have already been approved
+      try {
+        const snap = await getDocs(query(collection(db, "hotels"), orderBy("name", "asc")) as any);
+        const ids = snap.docs.map((d) => d.id);
+        // Build a set of name+location keys for extra matching fallback
+        const keySet = new Set<string>();
+        snap.docs.forEach((d) => {
+          const dt = d.data() as any;
+          const name = (dt.name || "").toString().trim().toLowerCase();
+          const location = (dt.location || "").toString().trim().toLowerCase();
+          if (name || location) keySet.add(`${name}:::${location}`);
+        });
+
+        const filtered = Array.isArray(data)
+          ? data.filter((p: any) => {
+              if (ids.includes(String(p.id))) return false;
+              const name = (p.name || "").toString().trim().toLowerCase();
+              const location = (p.location || "").toString().trim().toLowerCase();
+              if (keySet.has(`${name}:::${location}`)) return false;
+              return true;
+            })
+          : [];
+        setPendingHotels(filtered);
+      } catch (err) {
+        // If fetching hotels fails, fall back to showing raw pending items
+        console.warn("Failed to fetch hotels while filtering pending items:", err);
+        setPendingHotels(data || []);
+      }
     } catch (err) {
-      console.warn("Failed to fetch users count:", err);
-      setTotalUsers(null);
+      console.error("Failed to fetch pending hotels:", err);
+      setPendingHotels([]);
+    } finally {
+      setLoadingPending(false);
     }
+  }, [db]);
+
+  // (bookings/users counts removed — only total hotels shown)
+  // If you later want bookings/users counts, reintroduce aggregate queries here.
+  const fetchCounts = useCallback(async () => {
+    return;
   }, [db]);
 
   // dialog state for per-hotel actions
   const [selectedHotel, setSelectedHotel] = useState<HotelItem | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  const [pendingHotels, setPendingHotels] = useState<HotelItem[]>([]);
+  const [loadingPending, setLoadingPending] = useState(true);
+  // decision dialog state for approve/reject confirmation
+  const [decisionDialogOpen, setDecisionDialogOpen] = useState(false);
+  const [decisionAction, setDecisionAction] = useState<"approve" | "reject" | null>(null);
+  const [decisionHotel, setDecisionHotel] = useState<HotelItem | null>(null);
 
   
 
   useEffect(() => {
-    // read local admin flag from localStorage
-    try {
-      const flag = localStorage.getItem("hotbook_admin_signed_in");
-      setAdminSignedIn(flag === "true");
-    } catch {
-      // ignore
-    }
-
     // Only fetch hotels if we're admin (either Firebase user or local flag)
     if ((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) {
       fetchHotels();
       fetchCounts();
+      fetchPendingHotels();
+      fetchBookingsCount();
     }
 
     const onAdded = () => {
       if ((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) {
         fetchHotels();
         fetchCounts();
+        fetchPendingHotels();
+        fetchBookingsCount();
+      }
+    };
+
+    const onPendingAdded = () => {
+      if ((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) {
+        fetchPendingHotels();
       }
     };
 
     window.addEventListener("hotbook:hotel-added", onAdded);
+    window.addEventListener("hotbook:pending-hotel-added", onPendingAdded);
     return () => {
       window.removeEventListener("hotbook:hotel-added", onAdded);
+      window.removeEventListener("hotbook:pending-hotel-added", onPendingAdded);
     };
-  }, [user, loading, fetchHotels, fetchCounts, adminSignedIn]);
+  }, [user, loading, fetchHotels, fetchCounts, fetchPendingHotels, fetchBookingsCount, adminSignedIn]);
+
+  // fetch pending when dialog opens
+  useEffect(() => {
+    if (pendingDialogOpen) fetchPendingHotels();
+  }, [pendingDialogOpen, fetchPendingHotels]);
+
+  // When bookings dialog opens, load the bookings list for the dialog view
+  useEffect(() => {
+    if (showBookings) fetchBookingsList();
+  }, [showBookings, fetchBookingsList]);
+
+
+  // Approve a pending hotel: copy to `hotels` then delete pending doc
+  const approvePending = async (h: HotelItem) => {
+    if (!h.id) return;
+    try {
+      // Use the pending item provided by the API/list and write to Firestore
+      const approvedBy = user?.email ?? "admin";
+      const approvedAt = new Date().toISOString();
+      const targetRef = doc(db, "hotels", String(h.id));
+      // copy the pending fields into hotels; avoid sending the id twice
+      await setDoc(targetRef, { ...(h as unknown as Record<string, unknown>), verified: true, approvedBy, approvedAt }, { merge: true });
+
+      // Do NOT remove the server-side pending entry here. Instead, mark the
+      // item as accepted locally and notify other clients. Keeping the
+      // pending entry server-side ensures the original submission remains
+      // discoverable; the dashboard UI will keep the request visible and
+      // render it as "Approved" based on the status flags.
+      try {
+        try {
+          window.dispatchEvent(new CustomEvent("hotbook:pending-hotel-updated", { detail: { id: String(h.id), status: 'accepted' } }));
+          window.dispatchEvent(new CustomEvent("hotbook:hotel-added", { detail: { id: String(h.id) } }));
+        } catch {
+          // ignore
+        }
+        // Update this admin UI's pending list to reflect accepted status (keep item visible)
+        setPendingHotels((prev) => {
+          return (prev || []).map((x) => (String(x.id) === String(h.id) ? { ...x, status: 'accepted', accepted: true } : x));
+        });
+      } catch (e) {
+        console.warn("Failed to mark pending item as accepted locally:", e);
+      }
+
+      // refresh lists
+      fetchHotels();
+      fetchPendingHotels();
+      fetchCounts();
+      alert("Hotel approved and published.");
+    } catch (err) {
+      console.error("Failed to approve pending hotel:", err);
+      alert("Failed to approve pending hotel. See console for details.");
+    }
+  };
+
+  const rejectPending = async (h: HotelItem) => {
+    if (!h.id) return;
+    try {
+      // Delete the pending item from the server-side pending store so it
+      // no longer appears in the admin requests list. The dashboard will
+      // merge its local copy and set the status to 'rejected' so users
+      // still see the submission marked rejected.
+      try {
+        const res = await fetch(`/api/pending/${encodeURIComponent(String(h.id))}`, { method: "DELETE" });
+        if (!res.ok && res.status !== 404) {
+          console.warn("Pending DELETE returned non-ok status", res.status);
+        }
+      } catch {
+        // ignore network errors
+      }
+
+      try {
+        await fetch(`/api/pending/ensure-delete`, {
+          method: "POST",
+          body: JSON.stringify({ id: h.id, name: h.name, location: h.location }),
+          headers: { "content-type": "application/json" },
+        });
+      } catch {
+        // ignore
+      }
+
+      // Notify other clients that the pending item was updated/removed.
+      try {
+        window.dispatchEvent(new CustomEvent("hotbook:pending-hotel-updated", { detail: { id: String(h.id), status: 'rejected' } }));
+        window.dispatchEvent(new CustomEvent("hotbook:pending-hotel-removed", { detail: { id: String(h.id) } }));
+      } catch {
+        // ignore
+      }
+
+      // Remove from this admin UI's pending list
+      setPendingHotels((prev) => (prev || []).filter((x) => String(x.id) !== String(h.id)));
+      fetchPendingHotels();
+      alert("Pending hotel rejected and removed from admin requests.");
+    } catch (err) {
+      console.error("Failed to reject pending hotel:", err);
+      alert("Failed to reject pending hotel. See console for details.");
+    }
+  };
+
+  // Confirm decision handler (called from confirmation dialog)
+  const handleConfirmDecision = async () => {
+    if (!decisionHotel || !decisionAction) return;
+    const h = decisionHotel;
+    setDecisionDialogOpen(false);
+    setDecisionAction(null);
+    setDecisionHotel(null);
+
+    if (decisionAction === "approve") {
+      await approvePending(h);
+    } else if (decisionAction === "reject") {
+      await rejectPending(h);
+    }
+  };
 
   
 
@@ -241,64 +507,184 @@ export default function AdminPage() {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-medium">Hotels</h2>
           {((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline">Add Hotel</Button>
-              </DialogTrigger>
-              <DialogContent className="w-96 p-4">
-                <DialogHeader>
-                  <DialogTitle>Add New Hotel</DialogTitle>
-                </DialogHeader>
-                <AddHotelForm />
-              </DialogContent>
-            </Dialog>
+            <div className="ml-4">
+              <Button onClick={() => setPendingDialogOpen(true)} variant="outline" className="relative px-4 py-2">
+                <span>Hotel Requests</span>
+                {pendingHotels.length > 0 && (
+                  <Badge className="absolute -top-2 right-2 bg-red-600 text-white rounded-full px-2 py-0.5 text-xs">{pendingHotels.length}</Badge>
+                )}
+              </Button>
+            </div>
           )}
         </div>
 
         {/* Top stats: total hotels, bookings, users */}
         {((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) && (
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="rounded-lg bg-white/90 dark:bg-zinc-900/80 p-3 text-center shadow-sm">
-              <div className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{totalHotels ?? "—"}</div>
-              <div className="text-xs text-zinc-600 dark:text-zinc-400">Total hotels</div>
+          <div className="grid grid-cols-2 gap-4 mb-4 items-center justify-center">
+            <div className="p-0 text-center">
+              <Donut count={totalHotels} label="Total hotels" onActivate={() => setShowHotels(true)} />
             </div>
-            <div className="rounded-lg bg-white/90 dark:bg-zinc-900/80 p-3 text-center shadow-sm">
-              <div className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{totalBookings ?? "—"}</div>
-              <div className="text-xs text-zinc-600 dark:text-zinc-400">Total bookings</div>
-            </div>
-            <div className="rounded-lg bg-white/90 dark:bg-zinc-900/80 p-3 text-center shadow-sm">
-              <div className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{totalUsers ?? "—"}</div>
-              <div className="text-xs text-zinc-600 dark:text-zinc-400">Total users</div>
+            <div className="p-0 text-center">
+              <Donut count={totalBookings} label="Total bookings" onActivate={() => setShowBookings(true)} />
             </div>
           </div>
         )}
 
+        {/* Hotel requests dialog (opened from header) */}
+        <Dialog open={pendingDialogOpen} onOpenChange={setPendingDialogOpen}>
+          <DialogContent className="w-[90vw] max-w-2xl p-4">
+            <DialogHeader>
+              <DialogTitle>Hotel Requests</DialogTitle>
+            </DialogHeader>
+            {loadingPending ? (
+              <p>Loading hotel requests...</p>
+            ) : pendingHotels.length === 0 ? (
+              <p className="text-sm text-zinc-600">No hotel requests.</p>
+            ) : (
+              <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
+                {pendingHotels.map((p) => (
+                  <Card key={p.id}>
+                    <CardContent className="flex items-center justify-between gap-4">
+                      <div className="flex items-start gap-3">
+                        {p.image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.image} alt={p.name || "pending hotel"} className="w-20 h-14 object-cover rounded-md" />
+                        ) : (
+                          <div className="w-20 h-14 bg-zinc-100 dark:bg-zinc-800 rounded-md flex items-center justify-center text-xs text-zinc-500">No image</div>
+                        )}
+
+                        <div>
+                          <p className="font-semibold">{p.name}</p>
+                          <p className="text-sm text-zinc-600">{p.location}</p>
+
+                          <div className="mt-2 text-xs text-zinc-600">
+                            <div><strong>Price:</strong> {typeof p.price === 'number' ? `₱${p.price.toLocaleString()}` : (p.price ? `₱${p.price}` : 'N/A')}</div>
+                            <div><strong>Rooms:</strong> {p.roomsAvailable ?? 'N/A'}</div>
+                            <div className="truncate"><strong>Amenities:</strong> {Array.isArray(p.amenities) ? p.amenities.join(', ') : (p.amenities || 'None')}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => {
+                            setDecisionAction("approve");
+                            setDecisionHotel(p);
+                            setDecisionDialogOpen(true);
+                          }}
+                        >
+                          Approve
+                        </Button>
+
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            setDecisionAction("reject");
+                            setDecisionHotel(p);
+                            setDecisionDialogOpen(true);
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+          {/* Hotels dialog (opens when clicking the donut) */}
+          <Dialog open={showHotels} onOpenChange={setShowHotels}>
+            <DialogContent className="w-[90vw] max-w-3xl p-4">
+              <DialogHeader>
+                <DialogTitle>Hotels</DialogTitle>
+              </DialogHeader>
+              {loadingHotels ? (
+                <p>Loading hotels...</p>
+              ) : hotels.length === 0 ? (
+                <p className="text-sm text-zinc-600">No hotels found.</p>
+              ) : (
+                <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
+                  {hotels.map((h) => (
+                    <Card key={h.id}>
+                      <CardContent className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">{h.name}</p>
+                          <p className="text-sm text-zinc-600">{h.location}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleInfo(h)} title="Info" aria-label={`Info for ${h.name}`}>
+                            <Info className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleViewMap(h)} title="View map" aria-label={`View map for ${h.name}`}>
+                            <MapPin className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Bookings dialog (opens when clicking bookings donut) */}
+          <Dialog open={showBookings} onOpenChange={setShowBookings}>
+            <DialogContent className="w-[90vw] max-w-3xl p-4">
+              <DialogHeader>
+                <DialogTitle>Bookings</DialogTitle>
+              </DialogHeader>
+              {loadingBookings ? (
+                <p>Loading bookings...</p>
+              ) : bookings.length === 0 ? (
+                <p className="text-sm text-zinc-600">No bookings found.</p>
+              ) : (
+                <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
+                  {bookings.map((b) => (
+                    <Card key={b.id}>
+                      <CardContent className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold">{b.id}</p>
+                          <p className="text-sm text-zinc-600">{b.hotelName ?? b.hotelId ?? '—'}</p>
+                          <pre className="text-xs text-zinc-500 truncate">{JSON.stringify(b, null, 0)}</pre>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+        {/* Decision confirmation dialog for approve/reject */}
+        <Dialog open={decisionDialogOpen} onOpenChange={setDecisionDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{decisionAction === 'approve' ? 'Approve pending submission' : 'Reject pending submission'}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-600">Are you sure you want to {decisionAction} <strong>{decisionHotel?.name}</strong>?</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="ghost" onClick={() => { setDecisionDialogOpen(false); setDecisionAction(null); setDecisionHotel(null); }}>Cancel</Button>
+                <Button variant={decisionAction === 'reject' ? 'destructive' : 'default'} onClick={handleConfirmDecision}>
+                  {decisionAction === 'reject' ? 'Confirm Reject' : 'Confirm Approve'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Pending submissions awaiting admin review */}
+        {/* pending submissions are available from the header button */}
+
         {loadingHotels ? (
           <p>Loading hotels...</p>
-        ) : hotels.length === 0 ? (
-          <p>No hotels found. Add one using the menu above.</p>
-        ) : (
-          <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
-            {hotels.map((h) => (
-              <Card key={h.id}>
-                <CardContent className="flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold">{h.name}</p>
-                    <p className="text-sm text-zinc-600">{h.location}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handleInfo(h)} title="Info" aria-label={`Info for ${h.name}`}>
-                      <Info className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleViewMap(h)} title="View map" aria-label={`View map for ${h.name}`}>
-                      <MapPin className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+        ) : null}
         {/* Edit dialog removed — editing is handled inline in `HotelInfo` */}
 
         {/* Info dialog */}
