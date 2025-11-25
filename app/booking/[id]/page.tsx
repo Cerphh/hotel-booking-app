@@ -64,6 +64,10 @@ export default function HotelDetailsPage() {
   const [checkOut, setCheckOut] = useState("");
   const [isBooked, setIsBooked] = useState(false);
 
+  const handleBackNavigation = () => {
+    router.push("/hotels");
+  };
+
   // Load hotel data from localStorage or fetch
   useEffect(() => {
     const savedHotel = localStorage.getItem("selectedHotel");
@@ -140,7 +144,7 @@ export default function HotelDetailsPage() {
       <div className="flex min-h-screen flex-col items-center justify-center bg-[#EFECE3] dark:bg-zinc-950">
         <p className="mb-4 text-xl text-zinc-700 dark:text-zinc-300">Hotel not found</p>
         <button
-          onClick={() => router.back()}
+          onClick={handleBackNavigation}
           className="rounded-full bg-[#4A70A9] px-6 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#4A70A9]/90"
         >
           Go Back
@@ -154,7 +158,7 @@ export default function HotelDetailsPage() {
       <motion.div className="mx-auto max-w-6xl" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
         {/* Back Button */}
         <button
-          onClick={() => router.back()}
+          onClick={handleBackNavigation}
           className="mb-6 rounded-full border border-[#8FABD4]/50 bg-white/80 px-4 py-2 text-sm font-medium text-zinc-800 shadow-sm transition hover:bg-white dark:border-[#8FABD4]/60 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800"
         >
           ← Back
@@ -183,56 +187,56 @@ export default function HotelDetailsPage() {
               transition={{ delay: 0.2 }}
               className="mt-2 rounded-2xl border border-[#8FABD4]/40 bg-white/95 p-6 shadow-sm dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
             >
-          <h1 className="mb-2 text-3xl font-semibold tracking-tight text-[#000000] dark:text-zinc-50">
-            {hotel.name}
-          </h1>
-          <p className="mb-4 text-sm text-zinc-700 dark:text-zinc-400">{hotel.address}</p>
+              <h1 className="mb-2 text-3xl font-semibold tracking-tight text-[#000000] dark:text-zinc-50">
+                {hotel.name}
+              </h1>
+              <p className="mb-4 text-sm text-zinc-700 dark:text-zinc-400">{hotel.address}</p>
 
-          {/* Availability & Price */}
-          <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-[#8FABD4]/15 p-4">
-              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Price per night</p>
-              <p className="text-2xl font-semibold text-[#4A70A9]">
-                ₱{hotel.price?.toLocaleString() || "N/A"}
-              </p>
-            </div>
-            <div className="rounded-xl bg-[#EFECE3] p-4 dark:bg-zinc-800/80">
-              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Availability</p>
-              <p className="text-2xl font-semibold text-[#000000] dark:text-zinc-50">
-                {hotel.availability || 0} rooms
-              </p>
-            </div>
-            <div className="rounded-xl bg-[#4A70A9]/10 p-4 dark:bg-[#4A70A9]/30">
-              <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-200">Status</p>
-              <p
-                className={`text-2xl font-semibold ${
-                  isBooked
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-emerald-600 dark:text-emerald-400"
-                }`}
-              >
-                {isBooked ? "Booked" : "Available"}
-              </p>
-            </div>
-          </div>
-
-          {/* Amenities */}
-          {hotel.amenities && hotel.amenities.length > 0 && (
-            <div>
-              <h2 className="mb-3 text-lg font-semibold text-[#000000] dark:text-zinc-50">Amenities</h2>
-              <div className="flex flex-wrap gap-1.5">
-                {hotel.amenities.map((amenity, idx) => (
-                  <span
-                    key={idx}
-                    className="rounded-full border border-[#8FABD4]/60 bg-[#8FABD4]/15 px-3 py-1 text-xs font-medium text-[#4A70A9] dark:border-[#8FABD4]/70 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]"
+              {/* Availability & Price */}
+              <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="rounded-xl bg-[#8FABD4]/15 p-4">
+                  <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Price per night</p>
+                  <p className="text-2xl font-semibold text-[#4A70A9]">
+                    ₱{hotel.price?.toLocaleString() || "N/A"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[#EFECE3] p-4 dark:bg-zinc-800/80">
+                  <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-300">Availability</p>
+                  <p className="text-2xl font-semibold text-[#000000] dark:text-zinc-50">
+                    {hotel.availability || 0} rooms
+                  </p>
+                </div>
+                <div className="rounded-xl bg-[#4A70A9]/10 p-4 dark:bg-[#4A70A9]/30">
+                  <p className="mb-1 text-xs text-zinc-700 dark:text-zinc-200">Status</p>
+                  <p
+                    className={`text-2xl font-semibold ${
+                      isBooked
+                        ? "text-red-600 dark:text-red-400"
+                        : "text-emerald-600 dark:text-emerald-400"
+                    }`}
                   >
-                    {amenity}
-                  </span>
-                ))}
+                    {isBooked ? "Booked" : "Available"}
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
-        </motion.div>
+
+              {/* Amenities */}
+              {hotel.amenities && hotel.amenities.length > 0 && (
+                <div>
+                  <h2 className="mb-3 text-lg font-semibold text-[#000000] dark:text-zinc-50">Amenities</h2>
+                  <div className="flex flex-wrap gap-1.5">
+                    {hotel.amenities.map((amenity, idx) => (
+                      <span
+                        key={idx}
+                        className="rounded-full border border-[#8FABD4]/60 bg-[#8FABD4]/15 px-3 py-1 text-xs font-medium text-[#4A70A9] dark:border-[#8FABD4]/70 dark:bg-[#4A70A9]/25 dark:text-[#EFECE3]"
+                      >
+                        {amenity}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
 
         {/* Map */}
         {L && hotel.latitude && hotel.longitude && (
@@ -365,19 +369,19 @@ export default function HotelDetailsPage() {
     </div>
   </motion.div>
 
-      {/* Booking Modal */}
-      <BookingModal
-        hotel={hotel}
-        checkIn={checkIn}
-        checkOut={checkOut}
-        isOpen={isBookingOpen}
-        onClose={() => setIsBookingOpen(false)}
-        onBook={() => setIsBooked(true)}
-        onChangeDates={({ checkIn, checkOut }) => {
-          setCheckIn(checkIn);
-          setCheckOut(checkOut);
-        }}
-      />
-    </div>
+  {/* Booking Modal */}
+  <BookingModal
+    hotel={hotel}
+    checkIn={checkIn}
+    checkOut={checkOut}
+    isOpen={isBookingOpen}
+    onClose={() => setIsBookingOpen(false)}
+    onBook={() => setIsBooked(true)}
+    onChangeDates={({ checkIn, checkOut }) => {
+      setCheckIn(checkIn);
+      setCheckOut(checkOut);
+    }}
+  />
+</div>
   );
 }

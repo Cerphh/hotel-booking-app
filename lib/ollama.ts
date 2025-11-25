@@ -275,3 +275,27 @@ function formatWalkingTime(meters: number) {
   const minutes = Math.max(2, Math.round((meters / 1000) / 5 * 60));
   return `${minutes} min walk`;
 }
+
+import { NextResponse } from "next/server";
+
+export async function POST(req: Request) {
+  try {
+    const { latitude, longitude, hotelName } = await req.json();
+
+    if (!latitude || !longitude || !hotelName) {
+      return NextResponse.json(
+        { error: "latitude, longitude, and hotelName are required" },
+        { status: 400 }
+      );
+    }
+
+    const result = await getNearbyRecommendations(latitude, longitude, hotelName);
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to process request" },
+      { status: 500 }
+    );
+  }
+}
+

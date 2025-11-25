@@ -285,22 +285,27 @@ export default function HotelsPage() {
 
     setSearchLoading(true);
 
-    const filtered = hotels.filter((h) => {
-      const name = (h.name || "").toLowerCase();
-      const address = (h.address || "").toLowerCase();
-      const amenities = (h.amenities || []).join(" ").toLowerCase();
-      const priceStr = h.price ? String(h.price) : "";
+    // Add a small delay to make it feel more responsive
+    const timer = setTimeout(() => {
+      const filtered = hotels.filter((h) => {
+        const name = (h.name || "").toLowerCase();
+        const address = (h.address || "").toLowerCase();
+        const amenities = (h.amenities || []).join(" ").toLowerCase();
+        const priceStr = h.price ? String(h.price) : "";
 
-      const matchesNamePrefix = name.startsWith(trimmedInput) || name.includes(trimmedInput);
-      const matchesAddress = address.includes(trimmedInput);
-      const matchesAmenities = amenities.includes(trimmedInput);
-      const matchesPrice = priceStr.includes(trimmedInput);
+        const matchesNamePrefix = name.startsWith(trimmedInput) || name.includes(trimmedInput);
+        const matchesAddress = address.includes(trimmedInput);
+        const matchesAmenities = amenities.includes(trimmedInput);
+        const matchesPrice = priceStr.includes(trimmedInput);
 
-      return matchesNamePrefix || matchesAddress || matchesAmenities || matchesPrice;
-    });
+        return matchesNamePrefix || matchesAddress || matchesAmenities || matchesPrice;
+      });
 
-    setFilteredHotels(filtered);
-    setSearchLoading(false);
+      setFilteredHotels(filtered);
+      setSearchLoading(false);
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [inputValue, hotels]);
 
   const handleFavorite = (hotelId: string) => {

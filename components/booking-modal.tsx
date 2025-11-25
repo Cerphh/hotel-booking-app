@@ -38,6 +38,8 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
   const [guests, setGuests] = useState(1);
   const [roomType, setRoomType] = useState("standard");
   const [isLoading, setIsLoading] = useState(false);
+  const [bookingType, setBookingType] = useState<"nightly" | "hourly">("nightly");
+  const [hours, setHours] = useState(3);
 
   const roomTypes = [
     { id: "standard", name: "Standard Room", price: 0 },
@@ -49,7 +51,13 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
   const basePrice = hotel.price || 0;
   const roomExtra = selectedRoomType?.price || 0;
   const nightsCount = Math.max(1, Math.ceil((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)));
-  const totalPrice = (basePrice + roomExtra) * nightsCount;
+  
+  // Calculate price based on booking type
+  const hourlyRate = Math.round(basePrice / 6); // Hourly rate is ~1/6 of nightly rate
+  const totalPrice = bookingType === "hourly" 
+    ? (hourlyRate + Math.round(roomExtra / 6)) * hours
+    : (basePrice + roomExtra) * nightsCount;
+  
   const today = new Date().toISOString().split("T")[0];
 
   const handleBook = async () => {
@@ -71,6 +79,8 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
         checkOut,
         guests,
         roomType: selectedRoomType?.name,
+        bookingType,
+        hours: bookingType === "hourly" ? hours : undefined,
         totalPrice,
         status: "confirmed",
         bookingDate: new Date().toISOString(),
@@ -184,6 +194,53 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
                   </div>
                 </div>
 
+                {/* Booking Type */}
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-muted-foreground">Booking type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBookingType("nightly")}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                        bookingType === "nightly"
+                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
+                          : "border-border bg-background hover:bg-muted"
+                      }`}
+                    >
+                      Nightly
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBookingType("hourly")}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                        bookingType === "hourly"
+                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200"
+                          : "border-border bg-background hover:bg-muted"
+                      }`}
+                    >
+                      Hourly
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hours selector (only show for hourly) */}
+                {bookingType === "hourly" && (
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-muted-foreground">Duration</label>
+                    <select
+                      value={hours}
+                      onChange={(e) => setHours(parseInt(e.target.value))}
+                      className="w-full rounded-lg border bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                    >
+                      {[3, 6, 9, 12].map((h) => (
+                        <option key={h} value={h}>
+                          {h} hours
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Guests */}
                 <div className="space-y-1">
                   <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
@@ -243,20 +300,37 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-[#000000] dark:text-white">Price breakdown</span>
                   <Badge variant="outline" className="border-emerald-300 bg-emerald-50 text-[11px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-100">
-                    {nightsCount} night{nightsCount > 1 ? "s" : ""}
+                    {bookingType === "hourly" ? `${hours} hours` : `${nightsCount} night${nightsCount > 1 ? "s" : ""}`}
                   </Badge>
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-700 dark:text-zinc-300">Base ({nightsCount}×):</span>
-                    <span className="font-semibold text-[#000000] dark:text-white">₱{(basePrice * nightsCount).toLocaleString()}</span>
-                  </div>
-                  {roomExtra > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-zinc-700 dark:text-zinc-300">Room upgrade:</span>
-                      <span className="font-semibold text-[#000000] dark:text-white">₱{(roomExtra * nightsCount).toLocaleString()}</span>
-                    </div>
+                  {bookingType === "hourly" ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-700 dark:text-zinc-300">Hourly rate (₱{hourlyRate}/hr):</span>
+                        <span className="font-semibold text-[#000000] dark:text-white">₱{(hourlyRate * hours).toLocaleString()}</span>
+                      </div>
+                      {roomExtra > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-700 dark:text-zinc-300">Room upgrade:</span>
+                          <span className="font-semibold text-[#000000] dark:text-white">₱{(Math.round(roomExtra / 6) * hours).toLocaleString()}</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-700 dark:text-zinc-300">Base ({nightsCount}×):</span>
+                        <span className="font-semibold text-[#000000] dark:text-white">₱{(basePrice * nightsCount).toLocaleString()}</span>
+                      </div>
+                      {roomExtra > 0 && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-zinc-700 dark:text-zinc-300">Room upgrade:</span>
+                          <span className="font-semibold text-[#000000] dark:text-white">₱{(roomExtra * nightsCount).toLocaleString()}</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
