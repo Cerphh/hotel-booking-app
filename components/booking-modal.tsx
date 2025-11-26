@@ -60,6 +60,12 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
   
   const today = new Date().toISOString().split("T")[0];
 
+  const resolveImageSrc = (url?: string) => {
+    if (!url) return "/taal-gold.avif";
+    if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:")) return url;
+    return `/${url}`;
+  };
+
   const handleBook = async () => {
     if (!user) {
       toast.error("Please sign in to complete booking");
@@ -69,9 +75,11 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
     setIsLoading(true);
     try {
       const db = getFirestore(app);
+        const imageSrc = resolveImageSrc(hotel.imageUrl);
       const bookingData = {
         hotelId: hotel.id,
         hotelName: hotel.name,
+          hotelImage: imageSrc,
         userEmail: user.email,
         userId: user.uid,
         userName: user.displayName || "Guest",
@@ -286,16 +294,18 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
 
               {/* Right: image + price summary */}
               <div className="w-full max-w-xs space-y-3 rounded-xl border border-[#8FABD4]/40 bg-[#EFECE3] text-[#1B3054] p-4 text-xs sm:text-[13px] dark:border-[#8FABD4]/60 dark:bg-zinc-950/60 dark:text-zinc-100">
-                {hotel.imageUrl && (
-                  <div className="mb-2 h-24 w-full overflow-hidden rounded-lg bg-zinc-200">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={hotel.imageUrl}
-                      alt={hotel.name}
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                )}
+                <div className="mb-2 h-24 w-full overflow-hidden rounded-lg bg-zinc-200">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={resolveImageSrc(hotel.imageUrl)}
+                    alt={hotel.name}
+                    onError={(e) => {
+                      const t = e.currentTarget as HTMLImageElement;
+                      if (t.src && !t.src.endsWith("/taal-gold.avif")) t.src = "/taal-gold.avif";
+                    }}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
 
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-[#000000] dark:text-white">Price breakdown</span>

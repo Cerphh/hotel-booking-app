@@ -13,6 +13,8 @@ import {
   query,
   where,
   onSnapshot,
+  doc,
+  getDoc,
   FirestoreError,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
@@ -68,19 +70,92 @@ export default function HotelDetailsPage() {
     router.push("/hotels");
   };
 
-  // Load hotel data from localStorage or fetch
+  // helper to map stored imageUrl to usable src
+  const resolveImageSrc = (url?: string) => {
+    if (!url) return "/taal-gold.avif";
+    // if already a full absolute path or data URL, return as-is
+    if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:")) return url;
+    // otherwise treat it as a filename stored in `public/` and prepend `/`
+    return `/${url}`;
+  };
+
+  // Load hotel data from Firestore (fallback to localStorage)
   useEffect(() => {
-    const savedHotel = localStorage.getItem("selectedHotel");
-    if (savedHotel) {
-      const data = JSON.parse(savedHotel);
-      setHotel(data);
-      setCheckIn(data.checkIn || new Date().toISOString().split("T")[0]);
-      setCheckOut(
-        data.checkOut ||
-          new Date(Date.now() + 86400000).toISOString().split("T")[0]
-      );
-      setLoadingHotel(false);
-    }
+    const fetchHotel = async () => {
+      setLoadingHotel(true);
+      try {
+        const db = getFirestore(app);
+        if (hotelId) {
+          const docRef = doc(db, "hotels", hotelId);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            const data = snap.data() as any;
+            console.log("[booking page] Firestore hotel doc:", snap.id, data);
+            const mapped: Hotel = {
+              id: snap.id,
+              name: data.name,
+              latitude: data.latitude,
+              longitude: data.longitude,
+              address: data.address,
+              imageUrl: data.imageUrl,
+              price: data.price,
+              currency: data.currency,
+              availability: data.availability,
+              amenities: data.amenities,
+              description: data.description,
+            };
+            setHotel(mapped);
+            setCheckIn(data.checkIn || new Date().toISOString().split("T")[0]);
+            setCheckOut(
+              data.checkOut || new Date(Date.now() + 86400000).toISOString().split("T")[0]
+            );
+            setLoadingHotel(false);
+            return;
+          }
+        }
+
+        // fallback to localStorage
+        const savedHotel = localStorage.getItem("selectedHotel");
+        if (savedHotel) {
+          const data = JSON.parse(savedHotel);
+          console.log("[booking page] Using savedHotel from localStorage:", data);
+          // ensure shape matches Hotel interface
+          const mapped: Hotel = {
+            id: data.id || hotelId || "",
+            name: data.name,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            address: data.address,
+            imageUrl: data.imageUrl,
+            price: data.price,
+            currency: data.currency,
+            availability: data.availability,
+            amenities: data.amenities,
+            description: data.description,
+          };
+          setHotel(mapped);
+          setCheckIn(data.checkIn || new Date().toISOString().split("T")[0]);
+          setCheckOut(
+            data.checkOut || new Date(Date.now() + 86400000).toISOString().split("T")[0]
+          );
+        }
+      } catch (error) {
+        console.error("Error fetching hotel from Firestore:", error);
+        const savedHotel = localStorage.getItem("selectedHotel");
+        if (savedHotel) {
+          const data = JSON.parse(savedHotel);
+          setHotel(data);
+          setCheckIn(data.checkIn || new Date().toISOString().split("T")[0]);
+          setCheckOut(
+            data.checkOut || new Date(Date.now() + 86400000).toISOString().split("T")[0]
+          );
+        }
+      } finally {
+        setLoadingHotel(false);
+      }
+    };
+
+    fetchHotel();
   }, [hotelId]);
 
   // Fetch nearby recommendations from Ollama
@@ -129,7 +204,7 @@ export default function HotelDetailsPage() {
     );
 
     return () => unsubscribe();
-  }, [user?.email, hotel]);
+  }, [user?.uid, hotel]);
 
   if (loadingHotel) {
     return (
@@ -173,9 +248,17 @@ export default function HotelDetailsPage() {
               transition={{ delay: 0.1 }}
               className="h-96 overflow-hidden rounded-xl shadow-lg"
             >
+              {/* resolve image from public/ when imageUrl is a filename */}
               <img
-                src={hotel.imageUrl}
+                src={resolveImageSrc(hotel.imageUrl)}
                 alt={hotel.name}
+                onError={(e) => {
+                  // fallback if src fails to load
+                  const target = e.currentTarget as HTMLImageElement;
+                  if (target.src && !target.src.endsWith("/taal-gold.avif")) {
+                    target.src = "/taal-gold.avif";
+                  }
+                }}
                 className="h-full w-full object-cover transition-transform duration-500 hover:scale-105"
               />
             </motion.div>
@@ -279,7 +362,7 @@ export default function HotelDetailsPage() {
           <h2 className="mb-4 text-2xl font-semibold text-[#000000] dark:text-zinc-50">
             Nearby Attractions & Dining
           </h2>
-          {loadingRecommendations ? (
+              {loadingRecommendations ? (
             <div className="flex items-center justify-center py-8">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#4A70A9] border-t-transparent"></div>
             </div>
@@ -290,11 +373,15 @@ export default function HotelDetailsPage() {
                   key={idx}
                   className="overflow-hidden rounded-lg border border-[#8FABD4]/40 bg-white/95 shadow-sm transition hover:shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
                 >
-                  <img
-                    src={rec.imageUrl || "https://via.placeholder.com/400x300"}
-                    alt={rec.name}
-                    className="h-32 w-full object-cover"
-                  />
+                      <img
+                        src={resolveImageSrc(rec.imageUrl) || "https://via.placeholder.com/400x300"}
+                        alt={rec.name}
+                        onError={(e) => {
+                          const t = e.currentTarget as HTMLImageElement;
+                          if (t.src && !t.src.endsWith("/taal-gold.avif")) t.src = "/taal-gold.avif";
+                        }}
+                        className="h-32 w-full object-cover"
+                      />
                   <div className="p-3">
                     <div className="mb-2 flex items-start justify-between">
                       <h3 className="flex-1 text-sm font-semibold text-[#000000] dark:text-zinc-50">

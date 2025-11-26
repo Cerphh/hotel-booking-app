@@ -1,7 +1,7 @@
 "use client"; // must be first
 
 import { useAuth } from "@/lib/auth-context";
-import { redirect } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { staggerContainer, staggerItem, fadeInUp } from "@/lib/animations";
@@ -150,6 +150,7 @@ function AutoFitMap({ coords }: { coords: { lat: number; lon: number } }) {
 
 export default function Dashboard() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -179,6 +180,18 @@ export default function Dashboard() {
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<any | null>(null);
 
   const db = getFirestore(app);
+
+  // Resolve image paths stored in bookings/hotels to public/ when a filename is used
+  const resolveImageSrc = (url?: string | null) => {
+    if (!url) return "/taal-gold.avif";
+    try {
+      const s = String(url);
+      if (s.startsWith("http") || s.startsWith("/") || s.startsWith("data:")) return s;
+      return `/${s}`;
+    } catch {
+      return "/taal-gold.avif";
+    }
+  };
 
   // Displayed pending list: prefer current state, but fall back to localStorage
   // so that items removed from the server (e.g., rejected by admin) remain
@@ -812,9 +825,17 @@ export default function Dashboard() {
                 <div className="md:col-span-1">
                   <div className="h-40 w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
                     {pendingInfo.image ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={pendingInfo.image} alt={pendingInfo.name} className="w-full h-full object-cover" />
-                    ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={resolveImageSrc(pendingInfo.image)}
+                          alt={pendingInfo.name}
+                          onError={(e) => {
+                            const t = e.currentTarget as HTMLImageElement;
+                            if (t.src && !t.src.endsWith('/taal-gold.avif')) t.src = '/taal-gold.avif';
+                          }}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
                       <div className="text-sm text-zinc-500">No image available</div>
                     )}
                   </div>
@@ -972,7 +993,7 @@ export default function Dashboard() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => setInfoBooking(booking)}
+                              onClick={() => setInfoBooking({ ...booking, hotelImage: resolveImageSrc(booking.hotelImage) })}
                             >
                               Info
                             </Button>
@@ -1099,7 +1120,24 @@ export default function Dashboard() {
                               </button>
                               <button
                                 onClick={() => {
-                                  alert(`Book ${hotel.name} - Feature coming soon`);
+                                  try {
+                                    // Save a minimal selectedHotel object for the booking page fallback
+                                    const selected = {
+                                      id: hotel.id,
+                                      name: hotel.name,
+                                      latitude: hotel.latitude,
+                                      longitude: hotel.longitude,
+                                      address: hotel.location,
+                                      imageUrl: hotel.image,
+                                      price: hotel.price,
+                                      amenities: hotel.amenities,
+                                      description: hotel.description,
+                                    };
+                                    localStorage.setItem("selectedHotel", JSON.stringify(selected));
+                                  } catch (e) {
+                                    // ignore storage errors
+                                  }
+                                  router.push(`/booking/${hotel.id}`);
                                 }}
                                 className="rounded-full bg-[#4A70A9] px-4 py-1 text-[11px] font-medium text-white hover:bg-[#4A70A9]/90"
                               >
@@ -1255,7 +1293,15 @@ export default function Dashboard() {
                   <div className="h-40 w-full overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
                     {infoBooking.hotelImage ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={infoBooking.hotelImage} alt={infoBooking.hotelName} className="w-full h-full object-cover" />
+                      <img
+                        src={resolveImageSrc(infoBooking.hotelImage)}
+                        alt={infoBooking.hotelName}
+                        onError={(e) => {
+                          const t = e.currentTarget as HTMLImageElement;
+                          if (t.src && !t.src.endsWith('/taal-gold.avif')) t.src = '/taal-gold.avif';
+                        }}
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <div className="text-sm text-zinc-500">No image available</div>
                     )}
