@@ -178,6 +178,8 @@ export default function Dashboard() {
   const [cancelConfirmBooking, setCancelConfirmBooking] = useState<Booking | null>(null);
   const [withdrawConfirmPending, setWithdrawConfirmPending] = useState<any | null>(null);
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<any | null>(null);
+  const [approvedHotels, setApprovedHotels] = useState<Hotel[]>([]);
+  const [loadingApproved, setLoadingApproved] = useState(true);
 
   const db = getFirestore(app);
 

@@ -40,6 +40,7 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
   const [isLoading, setIsLoading] = useState(false);
   const [bookingType, setBookingType] = useState<"nightly" | "hourly">("nightly");
   const [hours, setHours] = useState(3);
+  const [rooms, setRooms] = useState(1);
 
   const roomTypes = [
     { id: "standard", name: "Standard Room", price: 0 },
@@ -52,11 +53,15 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
   const roomExtra = selectedRoomType?.price || 0;
   const nightsCount = Math.max(1, Math.ceil((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)));
   
+  // Get max available rooms from hotel data
+  const maxRooms = Math.max(1, hotel.availability || 5);
+  
   // Calculate price based on booking type
   const hourlyRate = Math.round(basePrice / 6); // Hourly rate is ~1/6 of nightly rate
-  const totalPrice = bookingType === "hourly" 
+  const pricePerRoom = bookingType === "hourly" 
     ? (hourlyRate + Math.round(roomExtra / 6)) * hours
     : (basePrice + roomExtra) * nightsCount;
+  const totalPrice = pricePerRoom * rooms;
   
   const today = new Date().toISOString().split("T")[0];
 
@@ -86,6 +91,7 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
         checkIn,
         checkOut,
         guests,
+        rooms,
         roomType: selectedRoomType?.name,
         bookingType,
         hours: bookingType === "hourly" ? hours : undefined,
@@ -248,6 +254,24 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
                     </select>
                   </div>
                 )}
+
+                {/* Number of Rooms */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-muted-foreground">
+                    Number of rooms {hotel.availability && <span className="text-muted-foreground/70">({hotel.availability} available)</span>}
+                  </label>
+                  <select
+                    value={rooms}
+                    onChange={(e) => setRooms(parseInt(e.target.value))}
+                    className="w-full rounded-lg border bg-background px-3 py-2 text-sm shadow-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  >
+                    {Array.from({ length: maxRooms }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n} {n === 1 ? "Room" : "Rooms"}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 {/* Guests */}
                 <div className="space-y-1">

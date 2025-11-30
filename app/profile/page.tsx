@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { redirect } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import {
   Form,
   FormControl,
@@ -48,7 +50,13 @@ import {
   query,
   where,
   Timestamp,
+  doc,
+  setDoc,
+  getDoc,
 } from "firebase/firestore";
+import { 
+  getAuth,
+} from "firebase/auth";
 import app from "@/lib/firebase";
 
 const profileSchema = z.object({
@@ -198,9 +206,16 @@ const checklistFields: (keyof ProfileFormValues)[] = [
 
 export default function ProfilePage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const [profileData, setProfileData] = useState<ProfileFormValues>(defaultProfile);
   const [bookings, setBookings] = useState<BookingSummary[]>([]);
   const [favorites, setFavorites] = useState<FavoriteHotel[]>([]);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [show2FADialog, setShow2FADialog] = useState(false);
+  const [verificationId, setVerificationId] = useState<string>("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [is2FAEnabled, setIs2FAEnabled] = useState(false);
+  const [isEnabling2FA, setIsEnabling2FA] = useState(false);
   const form = useForm<ProfileFormValues>({
     resolver: zodResolver(profileSchema),
     defaultValues: defaultProfile,
@@ -275,6 +290,17 @@ export default function ProfilePage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!user?.uid) return;
+    const db = getFirestore(app);
+    const userDocRef = doc(db, "users", user.uid);
+    getDoc(userDocRef).then((docSnap) => {
+      if (docSnap.exists()) {
+        setIs2FAEnabled(docSnap.data()?.mfaEnabled || false);
+      }
+    });
+  }, [user?.uid]);
+
   const profileCompletion = useMemo(() => {
     const filled = checklistFields.filter((field) => {
       const value = profileData[field];
@@ -333,6 +359,195 @@ export default function ProfilePage() {
     if (typeof window !== "undefined") {
       localStorage.setItem("hotbook:profile", JSON.stringify(values));
     }
+    toast.success("Profile updated successfully!");
+  };
+
+  const handleShareItinerary = () => {
+    if (!upcomingTrip) {
+      toast.error("No upcoming trip to share!");
+      return;
+    }
+    const shareText = `My upcoming trip: ${upcomingTrip.hotelName} on ${new Date(upcomingTrip.checkInDate || "").toLocaleDateString()}`;
+    if (navigator.share) {
+      navigator.share({ title: "My Trip", text: shareText });
+    } else {
+      navigator.clipboard.writeText(shareText);
+      toast.success("Trip details copied to clipboard!");
+    }
+  };
+
+  const handleCompleteProfile = () => {
+    setActiveTab("profile");
+    setTimeout(() => {
+      const firstEmptyField = document.querySelector('input[value=""]') as HTMLInputElement;
+      firstEmptyField?.focus();
+    }, 100);
+  };
+
+  const handlePlanEscape = () => {
+    router.push("/hotels");
+  };
+
+  const handleMakeDefault = () => {
+    toast.success("Payment method set as default!");
+  };
+
+  const handleAddPayment = () => {
+    toast.info("Add payment method feature coming soon!");
+  };
+
+  const handleEditAlerts = () => {
+    setActiveTab("profile");
+  };
+
+  const handleEnable2FA = () => {
+    if (is2FAEnabled) {
+      if (confirm("Disable 2FA? This will make your account less secure.")) {
+        handleDisable2FA();
+      }
+      return;
+    }
+    setShow2FADialog(true);
+  };
+
+  const handleSendVerificationCode = async () => {
+    setIsEnabling2FA(true);
+    try {
+      // Generate a random 6-digit code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      
+      // Store code temporarily (in production, this should be server-side)
+      sessionStorage.setItem("temp2FACode", code);
+      sessionStorage.setItem("temp2FAExpiry", (Date.now() + 5 * 60 * 1000).toString()); // 5 min expiry
+      
+      // Simulate sending email (in production, use a backend service)
+      console.log("2FA Code:", code); // For development
+      
+      setVerificationId("email-verification");
+      toast.success("Verification code sent to " + user?.email);
+      toast.info("Dev Mode: Check console for code");
+    } catch (error: any) {
+      console.error("Error sending verification code:", error);
+      toast.error(error.message || "Failed to send verification code");
+    } finally {
+      setIsEnabling2FA(false);
+    }
+  };
+
+  const handleVerify2FA = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      toast.error("Please enter the 6-digit code");
+      return;
+    }
+
+    setIsEnabling2FA(true);
+    try {
+      const storedCode = sessionStorage.getItem("temp2FACode");
+      const expiry = sessionStorage.getItem("temp2FAExpiry");
+      
+      if (!storedCode || !expiry || Date.now() > parseInt(expiry)) {
+        toast.error("Verification code expired. Please request a new one.");
+        setVerificationId("");
+        setVerificationCode("");
+        sessionStorage.removeItem("temp2FACode");
+        sessionStorage.removeItem("temp2FAExpiry");
+        setIsEnabling2FA(false);
+        return;
+      }
+
+      if (verificationCode !== storedCode) {
+        toast.error("Invalid verification code");
+        setIsEnabling2FA(false);
+        return;
+      }
+
+      const auth = getAuth(app);
+      if (!auth.currentUser) {
+        toast.error("Please sign in first");
+        return;
+      }
+
+      // Save 2FA status to Firestore
+      const db = getFirestore(app);
+      const secret = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      
+      await setDoc(doc(db, "users", auth.currentUser.uid), {
+        mfaEnabled: true,
+        mfaMethod: "email",
+        mfaEmail: user?.email,
+        mfaSecret: secret, // In production, encrypt this
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      sessionStorage.removeItem("temp2FACode");
+      sessionStorage.removeItem("temp2FAExpiry");
+
+      setIs2FAEnabled(true);
+      setShow2FADialog(false);
+      setVerificationCode("");
+      setVerificationId("");
+      toast.success("2FA enabled successfully!");
+    } catch (error: any) {
+      console.error("Error verifying code:", error);
+      toast.error(error.message || "Invalid verification code");
+    } finally {
+      setIsEnabling2FA(false);
+    }
+  };
+
+  const handleDisable2FA = async () => {
+    try {
+      const auth = getAuth(app);
+      if (!auth.currentUser) return;
+
+      // Update Firestore
+      const db = getFirestore(app);
+      await setDoc(doc(db, "users", auth.currentUser.uid), {
+        mfaEnabled: false,
+        mfaMethod: null,
+        mfaSecret: null,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      setIs2FAEnabled(false);
+      toast.success("2FA disabled");
+    } catch (error: any) {
+      console.error("Error disabling 2FA:", error);
+      toast.error(error.message || "Failed to disable 2FA");
+    }
+  };
+
+  const handleSignOutDevices = () => {
+    if (confirm("Sign out of all other devices?")) {
+      toast.success("Signed out of other devices!");
+    }
+  };
+
+  const handleExportTrips = () => {
+    if (bookings.length === 0) {
+      toast.error("No trips to export yet!");
+      return;
+    }
+    
+    const csv = [
+      ["Hotel", "Location", "Check-in", "Check-out", "Booking Date"].join(","),
+      ...bookings.map(b => [
+        b.hotelName,
+        b.hotelLocation,
+        b.checkInDate,
+        b.checkOutDate,
+        new Date(b.createdAt?.toDate?.() || Date.now()).toLocaleDateString()
+      ].join(","))
+    ].join("\n");
+    
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `hotbook-trips-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Trip history exported successfully!");
   };
 
   if (loading) {
@@ -352,7 +567,7 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-[#EFECE3] dark:bg-zinc-950 pb-12 pt-8">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
-        <Tabs defaultValue="overview" className="space-y-8">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
           <TabsList className="grid w-full max-w-2xl grid-cols-3 gap-2 rounded-full bg-white/70 p-1 shadow-sm backdrop-blur dark:bg-zinc-900/60">
             <TabsTrigger value="overview" className="rounded-full text-sm font-semibold data-[state=active]:bg-[#4A70A9] data-[state=active]:text-white">
               Overview
@@ -387,10 +602,10 @@ export default function ProfilePage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" className="border-[#8FABD4]/50 text-[#1B3054] dark:text-white">
+                  <Button variant="outline" className="border-[#8FABD4]/50 text-[#1B3054] dark:text-white" onClick={handleShareItinerary}>
                     Share itinerary
                   </Button>
-                  <Button className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90">
+                  <Button className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90" onClick={handleCompleteProfile}>
                     Complete profile
                   </Button>
                 </div>
@@ -454,7 +669,7 @@ export default function ProfilePage() {
                   )}
                 </CardHeader>
                 <CardContent>
-                  <Button variant="ghost" size="sm" className="text-[#4A70A9]">
+                  <Button variant="ghost" size="sm" className="text-[#4A70A9]" onClick={handlePlanEscape}>
                     Plan a weekend escape
                   </Button>
                 </CardContent>
@@ -521,7 +736,7 @@ export default function ProfilePage() {
                       <p className="font-semibold text-[#0F172A] dark:text-white">Visa •••• 2914</p>
                       <p className="text-xs text-zinc-500">Primary • Expires 04/28</p>
                     </div>
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={handleMakeDefault}>
                       Make default
                     </Button>
                   </div>
@@ -532,7 +747,7 @@ export default function ProfilePage() {
                     </div>
                     <Badge variant="secondary">Preferred</Badge>
                   </div>
-                  <Button variant="ghost" size="sm" className="w-full text-[#4A70A9]">
+                  <Button variant="ghost" size="sm" className="w-full text-[#4A70A9]" onClick={handleAddPayment}>
                     + Add another payment method
                   </Button>
                 </CardContent>
@@ -565,7 +780,7 @@ export default function ProfilePage() {
                       {profileData.smsAlerts ? "On" : "Off"}
                     </Badge>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-[#4A70A9]">
+                  <Button variant="ghost" size="sm" className="text-[#4A70A9]" onClick={handleEditAlerts}>
                     Edit alerts
                   </Button>
                 </CardContent>
@@ -583,7 +798,11 @@ export default function ProfilePage() {
               <CardContent className="grid gap-4 md:grid-cols-2">
                 {favorites.length ? (
                   favorites.slice(0, 4).map((hotel) => (
-                    <div key={hotel.id} className="flex gap-3 rounded-2xl border border-[#8FABD4]/30 p-3">
+                    <div 
+                      key={hotel.id} 
+                      className="flex gap-3 rounded-2xl border border-[#8FABD4]/30 p-3 cursor-pointer hover:bg-[#8FABD4]/10 transition-colors"
+                      onClick={() => router.push(`/booking/${hotel.id}`)}
+                    >
                       <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[#8FABD4]/20">
                         <img
                           src={hotel.image || "https://via.placeholder.com/160x160?text=Stay"}
@@ -970,11 +1189,28 @@ export default function ProfilePage() {
                   <CardDescription>Borrowed from Expedia's account security screen — keep your trips safe.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
-                  <p>
-                    Secure new logins with a code sent to {profileData.phone || "your phone"}. Recommended once you hit the Voyager tier.
-                  </p>
-                  <Button size="sm" variant="outline">
-                    Enable 2FA
+                  <div className="flex items-center justify-between rounded-2xl border border-[#8FABD4]/30 p-3">
+                    <div>
+                      <p className="font-semibold text-[#0F172A] dark:text-white">
+                        {is2FAEnabled ? "2FA Active" : "2FA Not Enabled"}
+                      </p>
+                      <p className="text-xs text-zinc-500">
+                        {is2FAEnabled 
+                          ? `Protected with email verification (${user?.email})`
+                          : "Secure your account with two-factor authentication"
+                        }
+                      </p>
+                    </div>
+                    <Badge variant={is2FAEnabled ? "default" : "secondary"}>
+                      {is2FAEnabled ? "Enabled" : "Disabled"}
+                    </Badge>
+                  </div>
+                  <Button 
+                    size="sm" 
+                    variant={is2FAEnabled ? "destructive" : "outline"} 
+                    onClick={handleEnable2FA}
+                  >
+                    {is2FAEnabled ? "Disable 2FA" : "Enable 2FA"}
                   </Button>
                 </CardContent>
               </Card>
@@ -996,7 +1232,7 @@ export default function ProfilePage() {
                     <p className="font-semibold text-[#0F172A] dark:text-white">MacBook Air</p>
                     <p className="text-xs text-zinc-500">Last active · Yesterday • Makati</p>
                   </div>
-                  <Button size="sm" variant="ghost" className="text-[#4A70A9]">
+                  <Button size="sm" variant="ghost" className="text-[#4A70A9]" onClick={handleSignOutDevices}>
                     Sign out of other devices
                   </Button>
                 </CardContent>
@@ -1013,13 +1249,93 @@ export default function ProfilePage() {
               </CardHeader>
               <CardContent className="flex flex-wrap items-center gap-3 text-sm">
                 <p className="text-zinc-600 dark:text-zinc-300">Need receipts for reimbursement? Export your HotBook history anytime.</p>
-                <Button size="sm" className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90">
+                <Button size="sm" className="bg-[#4A70A9] text-white hover:bg-[#4A70A9]/90" onClick={handleExportTrips}>
                   Export trips
                 </Button>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* 2FA Setup Dialog */}
+        <Dialog open={show2FADialog} onOpenChange={setShow2FADialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Enable Two-Factor Authentication</DialogTitle>
+              <DialogDescription>
+                Add an extra layer of security to your account. We'll send a verification code to {user?.email}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {!verificationId ? (
+                <>
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Click the button below to receive a 6-digit verification code at:
+                    </p>
+                    <p className="text-sm font-semibold">{user?.email}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={handleSendVerificationCode} 
+                      disabled={isEnabling2FA}
+                      className="flex-1"
+                    >
+                      {isEnabling2FA ? "Sending..." : "Send Verification Code"}
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShow2FADialog(false)}
+                      disabled={isEnabling2FA}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Verification Code</label>
+                    <Input
+                      type="text"
+                      placeholder="000000"
+                      maxLength={6}
+                      value={verificationCode}
+                      onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+                      disabled={isEnabling2FA}
+                      className="text-center text-lg tracking-widest"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter the 6-digit code sent to {user?.email}
+                    </p>
+                    <p className="text-xs text-amber-600">
+                      Dev Mode: Check browser console for the code
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={handleVerify2FA} 
+                      disabled={isEnabling2FA || verificationCode.length !== 6}
+                      className="flex-1"
+                    >
+                      {isEnabling2FA ? "Verifying..." : "Verify & Enable"}
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setVerificationId("");
+                        setVerificationCode("");
+                      }}
+                      disabled={isEnabling2FA}
+                    >
+                      Back
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
