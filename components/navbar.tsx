@@ -30,7 +30,7 @@ export function Navbar() {
   const navLinks = [
     { href: "/hotels", label: "Hotels" },
     { href: "/dashboard", label: "Dashboard" },
-    { href: "#", label: "About" },
+    { href: "/about", label: "About" },
   ];
   const isAdminPage = pathname?.startsWith("/admin");
 
