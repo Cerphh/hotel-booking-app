@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 // redirect not used here; admin access handled locally
 import { useEffect, useState, useCallback } from "react";
 import React from "react";
-import { getFirestore, collection, collectionGroup, getDocs, getCountFromServer, query, orderBy, doc, setDoc } from "firebase/firestore";
+import { getFirestore, collection, getDocs, query, orderBy, doc, setDoc } from "firebase/firestore";
 import app from "@/lib/firebase";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,9 +62,6 @@ export default function AdminPage() {
   const [hotels, setHotels] = useState<HotelItem[]>([]);
   const [loadingHotels, setLoadingHotels] = useState(true);
   const [totalHotels, setTotalHotels] = useState<number | null>(null);
-  const [bookings, setBookings] = useState<any[]>([]);
-  const [loadingBookings, setLoadingBookings] = useState(true);
-  const [totalBookings, setTotalBookings] = useState<number | null>(null);
   
   // form state removed — add hotel UI moved into the navbar dialog
 
@@ -84,7 +81,6 @@ export default function AdminPage() {
   const db = getFirestore(app);
 
   const [showHotels, setShowHotels] = useState(false);
-  const [showBookings, setShowBookings] = useState(false);
 
   // Small presentational donut that displays a centered count.
   const Donut = ({
@@ -96,19 +92,33 @@ export default function AdminPage() {
     label?: string;
     onActivate?: () => void;
   }) => {
-    const size = 140;
-    const stroke = 16;
+    const size = 220;
+    const stroke = 24;
     const radius = (size - stroke) / 2;
     const circumference = 2 * Math.PI * radius;
     // Decorative full ring for now; progress can be used later.
     const progress = 100;
     const dashoffset = circumference - (progress / 100) * circumference;
 
+    // Draw the colored gradient ring slightly inside the base ring so the
+    // base (background) ring remains visible as a dark-gray "pie" color
+    // in both light and dark themes.
+    const innerRadius = Math.max(8, radius - Math.round(stroke * 0.15));
+    const innerCircumference = 2 * Math.PI * innerRadius;
+    const innerDashoffset = innerCircumference - (progress / 100) * innerCircumference;
+
     const interactive = typeof onActivate === "function";
+
+    // Detect dark mode on the client and pick muted, non-vibrant colors that
+    // complement the background in each theme.
+    const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
+    const baseColorClass = isDark ? 'text-zinc-400/70' : 'text-zinc-600/80';
+    // Muted neutral colors (non-vibrant) for dark/light themes
+    const solidColor = isDark ? '#9CA3AF' : '#6B7280';
 
     return (
       <div
-        className={`relative w-[140px] h-[140px] mx-auto ${interactive ? 'cursor-pointer' : ''}`}
+        className={`relative w-[220px] h-[220px] mx-auto ${baseColorClass} ${interactive ? 'cursor-pointer' : ''}`}
         {...(interactive
           ? {
               role: 'button',
@@ -123,71 +133,33 @@ export default function AdminPage() {
             }
           : {})}
       >
-        <div className="absolute -top-7 left-1/2 transform -translate-x-1/2 text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{label}</div>
+        <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 text-sm text-zinc-600 dark:text-zinc-400 whitespace-nowrap">{label}</div>
 
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block" aria-hidden>
-          <defs>
-            <linearGradient id="donutGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#7c3aed" />
-              <stop offset="100%" stopColor="#06b6d4" />
-            </linearGradient>
-          </defs>
+          {/* single-color donut: no gradient defs needed */}
           <g transform={`translate(${size / 2}, ${size / 2})`}>
-            <circle r={radius} fill="none" strokeWidth={stroke} stroke="#eef2ff" />
+            <circle r={radius} fill="none" strokeWidth={stroke} stroke={solidColor} />
             <circle
-              r={radius}
+              r={innerRadius}
               fill="none"
-              strokeWidth={stroke}
-              stroke="url(#donutGradient)"
+              strokeWidth={Math.max(6, stroke - 8)}
+              stroke={solidColor}
               strokeLinecap="round"
-              strokeDasharray={`${circumference} ${circumference}`}
-              strokeDashoffset={dashoffset}
+              strokeDasharray={`${innerCircumference} ${innerCircumference}`}
+              strokeDashoffset={innerDashoffset}
               transform={`rotate(-90)`}
             />
           </g>
         </svg>
 
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">{count ?? '—'}</div>
+          <div className="text-5xl font-semibold text-zinc-900 dark:text-zinc-100">{count ?? '—'}</div>
         </div>
       </div>
     );
   };
 
-  // fetch bookings count efficiently and provide a separate loader for the list
-  const fetchBookingsCount = useCallback(async () => {
-    try {
-      // Try server-side aggregation first to avoid downloading all booking docs
-      try {
-        const agg = await getCountFromServer(query(collectionGroup(db, "bookings")));
-        const count = agg.data().count ?? 0;
-        setTotalBookings(Number(count));
-        return;
-      } catch (e) {
-        console.warn("getCountFromServer failed for bookings, falling back to getDocs:", e);
-      }
-
-      const snap = await getDocs(collectionGroup(db, "bookings"));
-      setTotalBookings(snap.size);
-    } catch (err) {
-      console.error("Failed to fetch bookings count:", err);
-      setTotalBookings(null);
-    }
-  }, [db]);
-
-  const fetchBookingsList = useCallback(async () => {
-    try {
-      setLoadingBookings(true);
-      const snap = await getDocs(query(collectionGroup(db, "bookings")));
-      const data = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
-      setBookings(data);
-    } catch (err) {
-      console.error("Failed to fetch bookings list:", err);
-      setBookings([]);
-    } finally {
-      setLoadingBookings(false);
-    }
-  }, [db]);
+  // bookings UI and server-side counts removed from admin dashboard
 
   // fetch helper moved out so we can call it from event listener
   const fetchHotels = useCallback(async () => {
@@ -276,7 +248,6 @@ export default function AdminPage() {
       fetchHotels();
       fetchCounts();
       fetchPendingHotels();
-      fetchBookingsCount();
     }
 
     const onAdded = () => {
@@ -284,7 +255,6 @@ export default function AdminPage() {
         fetchHotels();
         fetchCounts();
         fetchPendingHotels();
-        fetchBookingsCount();
       }
     };
 
@@ -300,17 +270,14 @@ export default function AdminPage() {
       window.removeEventListener("hotbook:hotel-added", onAdded);
       window.removeEventListener("hotbook:pending-hotel-added", onPendingAdded);
     };
-  }, [user, loading, fetchHotels, fetchCounts, fetchPendingHotels, fetchBookingsCount, adminSignedIn]);
+  }, [user, loading, fetchHotels, fetchCounts, fetchPendingHotels, adminSignedIn]);
 
   // fetch pending when dialog opens
   useEffect(() => {
     if (pendingDialogOpen) fetchPendingHotels();
   }, [pendingDialogOpen, fetchPendingHotels]);
 
-  // When bookings dialog opens, load the bookings list for the dialog view
-  useEffect(() => {
-    if (showBookings) fetchBookingsList();
-  }, [showBookings, fetchBookingsList]);
+  // bookings list UI removed
 
 
   // Approve a pending hotel: copy to `hotels` then delete pending doc
@@ -520,12 +487,9 @@ export default function AdminPage() {
 
         {/* Top stats: total hotels, bookings, users */}
         {((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) && (
-          <div className="grid grid-cols-2 gap-4 mb-4 items-center justify-center">
-            <div className="p-0 text-center">
+          <div className="flex items-center justify-center mb-6 h-[60vh]">
+            <div className="p-0 text-center mx-auto">
               <Donut count={totalHotels} label="Total hotels" onActivate={() => setShowHotels(true)} />
-            </div>
-            <div className="p-0 text-center">
-              <Donut count={totalBookings} label="Total bookings" onActivate={() => setShowBookings(true)} />
             </div>
           </div>
         )}
@@ -633,33 +597,7 @@ export default function AdminPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Bookings dialog (opens when clicking bookings donut) */}
-          <Dialog open={showBookings} onOpenChange={setShowBookings}>
-            <DialogContent className="w-[90vw] max-w-3xl p-4">
-              <DialogHeader>
-                <DialogTitle>Bookings</DialogTitle>
-              </DialogHeader>
-              {loadingBookings ? (
-                <p>Loading bookings...</p>
-              ) : bookings.length === 0 ? (
-                <p className="text-sm text-zinc-600">No bookings found.</p>
-              ) : (
-                <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
-                  {bookings.map((b) => (
-                    <Card key={b.id}>
-                      <CardContent className="flex items-center justify-between">
-                        <div>
-                          <p className="font-semibold">{b.id}</p>
-                          <p className="text-sm text-zinc-600">{b.hotelName ?? b.hotelId ?? '—'}</p>
-                          <pre className="text-xs text-zinc-500 truncate">{JSON.stringify(b, null, 0)}</pre>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </DialogContent>
-          </Dialog>
+          {/* Bookings dialog removed */}
 
         {/* Decision confirmation dialog for approve/reject */}
         <Dialog open={decisionDialogOpen} onOpenChange={setDecisionDialogOpen}>

@@ -59,7 +59,7 @@ if (typeof window !== "undefined") {
       try {
         // some leaflet typings don't expose _getIconUrl; guard at runtime
         // @ts-ignore
-        delete (_L as any).Icon.Default.prototype._getIconUrl;
+        fdsadelete (_L as any).Icon.Default.prototype._getIconUrl;
       } catch {
         // ignore
       }
@@ -636,17 +636,31 @@ export default function Dashboard() {
     }
   }, [editBooking]);
 
-  // Calculate price based on nights
-  const calculatePrice = (checkIn: string, checkOut: string, basePrice: number) => {
+  // Calculate price based on nights and selected room type
+  // roomType modifiers: Standard = +0, Deluxe = +500 per night, Suite = +1500 per night
+  const calculatePrice = (
+    checkIn: string,
+    checkOut: string,
+    basePrice: number,
+    roomType: string = "Standard"
+  ) => {
     if (!checkIn || !checkOut) return basePrice;
     const checkInDate = new Date(checkIn);
     const checkOutDate = new Date(checkOut);
     const nights = Math.ceil((checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
     if (nights <= 0) return basePrice;
-    // Assuming the original price is per night
-    const pricePerNight = (editBooking?.totalPrice || basePrice) / 
-      (editBooking ? Math.ceil((new Date(editBooking.checkOutDate).getTime() - new Date(editBooking.checkInDate).getTime()) / (1000 * 60 * 60 * 24)) : 1);
-    return Math.round(pricePerNight * nights);
+
+    // Determine price per night. If an existing booking total exists, derive per-night
+    const pricePerNight = (editBooking?.totalPrice || basePrice) /
+      (editBooking ? Math.max(1, Math.ceil((new Date(editBooking.checkOutDate).getTime() - new Date(editBooking.checkInDate).getTime()) / (1000 * 60 * 60 * 24))) : 1);
+
+    // Apply room type modifier (treated as per-night additive)
+    let modifierPerNight = 0;
+    const rt = (roomType || "Standard").toString().toLowerCase();
+    if (rt === "deluxe") modifierPerNight = 500;
+    else if (rt === "suite") modifierPerNight = 1500;
+
+    return Math.round((pricePerNight + modifierPerNight) * nights);
   };
 
   // Withdraw pending submission (called from confirmation modal)
@@ -1476,14 +1490,17 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Room Type</label>
-                    <input
-                      type="text"
+                    <select
                       value={editFormData.roomType}
                       onChange={(e) => {
                         setEditFormData({ ...editFormData, roomType: e.target.value });
                       }}
                       className="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-lg bg-white dark:bg-zinc-800 text-black dark:text-white"
-                    />
+                    >
+                      <option value="Standard">Standard</option>
+                      <option value="Deluxe">Deluxe (+₱500/night)</option>
+                      <option value="Suite">Suite (+₱1500/night)</option>
+                    </select>
                   </div>
                 </div>
 
@@ -1492,7 +1509,7 @@ export default function Dashboard() {
                   <input
                     type="number"
                     disabled
-                    value={calculatePrice(editFormData.checkInDate, editFormData.checkOutDate, editBooking?.price || 0)}
+                    value={calculatePrice(editFormData.checkInDate, editFormData.checkOutDate, editBooking?.price || 0, editFormData.roomType)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-zinc-600 rounded-lg bg-gray-100 dark:bg-zinc-700 text-black dark:text-white cursor-not-allowed opacity-60"
                   />
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Price updates automatically based on check-in and check-out dates</p>
@@ -1510,7 +1527,7 @@ export default function Dashboard() {
                     type="submit"
                     onClick={async () => {
                       try {
-                        const calculatedPrice = calculatePrice(editFormData.checkInDate, editFormData.checkOutDate, editBooking?.price || 0);
+                        const calculatedPrice = calculatePrice(editFormData.checkInDate, editFormData.checkOutDate, editBooking?.price || 0, editFormData.roomType);
                         const bookingRef = doc(db, "bookings", editBooking.id);
                         await updateDoc(bookingRef, {
                           checkInDate: editFormData.checkInDate,
