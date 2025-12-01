@@ -264,12 +264,45 @@ export default function HotelsPage() {
           return 0;
         });
 
+        // If Firestore returned no hotels, try a localStorage fallback so the UI isn't empty
+        if (list.length === 0) {
+          try {
+            const saved: string | null = localStorage.getItem("savedHotels");
+            if (saved) {
+              const parsed: Hotel[] = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setHotels(parsed);
+                setFilteredHotels(parsed);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch (e) {
+            // ignore parse errors
+            console.warn("Failed to load savedHotels from localStorage", e);
+          }
+        }
+
         setHotels(list);
         setFilteredHotels(list);
         setLoading(false);
       },
       (err) => {
         console.error("Error listening to hotels collection:", err);
+        // On error, try localStorage fallback so the page still shows something
+        try {
+          const saved: string | null = localStorage.getItem("savedHotels");
+          if (saved) {
+            const parsed: Hotel[] = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setHotels(parsed);
+              setFilteredHotels(parsed);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to load savedHotels from localStorage after snapshot error", e);
+        }
+
         setLoading(false);
       }
     );

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import "leaflet/dist/leaflet.css";
 import { useAuth } from "@/lib/auth-context";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { getNearbyRecommendations, NearbyRecommendation } from "@/lib/ollama";
+import type { NearbyRecommendation } from "@/lib/ollama";
+import AttractionMapDialog from "@/components/attraction-map-dialog";
 import { BookingModal } from "@/components/booking-modal";
 import dynamic from "next/dynamic";
 import {
@@ -18,6 +20,7 @@ import {
   FirestoreError,
 } from "firebase/firestore";
 import app from "@/lib/firebase";
+import { haversineDistanceMeters, formatDistance, formatWalkingTime } from '@/lib/utils';
 
 let L: typeof import("leaflet") | null = null;
 if (typeof window !== "undefined") {
@@ -32,10 +35,7 @@ if (typeof window !== "undefined") {
   }
 }
 
-const MapContainer = dynamic(() => import("react-leaflet").then((mod) => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import("react-leaflet").then((mod) => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import("react-leaflet").then((mod) => mod.Marker), { ssr: false });
-const Popup = dynamic(() => import("react-leaflet").then((mod) => mod.Popup), { ssr: false });
+const LeafletMap = dynamic(() => import("@/components/leaflet-map"), { ssr: false });
 
 interface Hotel {
   id: string;
@@ -59,8 +59,12 @@ export default function HotelDetailsPage() {
 
   const [hotel, setHotel] = useState<Hotel | null>(null);
   const [recommendations, setRecommendations] = useState<NearbyRecommendation[]>([]);
+  const [recError, setRecError] = useState<string | null>(null);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [selectedAttraction, setSelectedAttraction] = useState<NearbyRecommendation | null>(null);
   const [loadingHotel, setLoadingHotel] = useState(true);
   const [loadingRecommendations, setLoadingRecommendations] = useState(true);
+  const [isClient, setIsClient] = useState(false);
   const [isBookingOpen, setIsBookingOpen] = useState(false);
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
@@ -81,6 +85,8 @@ export default function HotelDetailsPage() {
 
   // Load hotel data from Firestore (fallback to localStorage)
   useEffect(() => {
+    // mark client mounted to avoid rendering Leaflet before DOM available
+    setIsClient(true);
     const fetchHotel = async () => {
       setLoadingHotel(true);
       try {
@@ -162,18 +168,65 @@ export default function HotelDetailsPage() {
   useEffect(() => {
     if (!hotel) return;
 
+    const geocodeAddress = async (address?: string) => {
+      if (!address) return null;
+      try {
+        const q = encodeURIComponent(address);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const item = data[0];
+          const lat = parseFloat(item.lat);
+          const lon = parseFloat(item.lon);
+          if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+        }
+      } catch (e) {
+        console.error("Geocoding failed:", e);
+      }
+      return null;
+    };
+
     const fetchRecommendations = async () => {
       setLoadingRecommendations(true);
       try {
+        let lat = hotel.latitude;
+        let lon = hotel.longitude;
+
+        // If coordinates are missing or invalid, try geocoding from address
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          const geo = await geocodeAddress(hotel.address || hotel.name);
+          if (geo) {
+            lat = geo.lat;
+            lon = geo.lon;
+          }
+        }
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          // as last resort, call with NaN so helper will fall back to mock
+          console.warn("No valid hotel coordinates; falling back to mock recommendations");
+        }
+
         const hotelContextName = `${hotel.name}${hotel.address ? ', ' + hotel.address : ''}`;
-        const result = await getNearbyRecommendations(
-          hotel.latitude,
-          hotel.longitude,
-          hotelContextName
-        );
-        setRecommendations(result.recommendations);
+        try {
+          const apiUrl = `/api/debug-recommendations?lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lon))}&hotelName=${encodeURIComponent(hotelContextName)}`;
+          const r = await fetch(apiUrl);
+          if (r.ok) {
+            const j = await r.json();
+            setRecommendations(j.recommendations || []);
+            setRecError(j.error || null);
+          } else {
+            setRecError(`API error ${r.status}`);
+            setRecommendations([]);
+          }
+        } catch (e) {
+          console.error('Error calling recommendations API', e);
+          setRecError((e as any)?.message || String(e));
+          setRecommendations([]);
+        }
       } catch (error) {
         console.error("Error fetching recommendations:", error);
+        setRecError((error as any)?.message || String(error));
       } finally {
         setLoadingRecommendations(false);
       }
@@ -181,6 +234,29 @@ export default function HotelDetailsPage() {
 
     fetchRecommendations();
   }, [hotel]);
+
+  const handleRefreshRecommendations = async () => {
+    if (!hotel) return;
+    setLoadingRecommendations(true);
+    try {
+      const hotelContextName = `${hotel.name}${hotel.address ? ', ' + hotel.address : ''}`;
+      const apiUrl = `/api/debug-recommendations?lat=${encodeURIComponent(String(hotel.latitude))}&lon=${encodeURIComponent(String(hotel.longitude))}&hotelName=${encodeURIComponent(hotelContextName)}`;
+      const r = await fetch(apiUrl);
+      if (r.ok) {
+        const j = await r.json();
+        setRecommendations(j.recommendations || []);
+        setRecError(j.error || null);
+      } else {
+        setRecError(`API error ${r.status}`);
+        setRecommendations([]);
+      }
+    } catch (err) {
+      console.error("Error refreshing recommendations:", err);
+      setRecError((err as any)?.message || String(err));
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  };
 
   // Check if hotel is already booked
   useEffect(() => {
@@ -322,33 +398,14 @@ export default function HotelDetailsPage() {
             </motion.div>
 
         {/* Map */}
-        {L && hotel.latitude && hotel.longitude && (
+        {isClient && hotel.latitude && hotel.longitude && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
             className="relative z-10 h-96 overflow-hidden rounded-xl shadow-md"
           >
-            <MapContainer
-              center={[hotel.latitude, hotel.longitude]}
-              zoom={16}
-              scrollWheelZoom
-              style={{ width: "100%", height: "100%", zIndex: 0 }}
-              className="isolate"
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-              />
-              <Marker position={[hotel.latitude, hotel.longitude]}>
-                <Popup>
-                  <div>
-                    <h3 className="font-bold">{hotel.name}</h3>
-                    <p className="text-sm">{hotel.address}</p>
-                  </div>
-                </Popup>
-              </Marker>
-            </MapContainer>
+            <LeafletMap lat={hotel.latitude} lon={hotel.longitude} name={hotel.name} address={hotel.address} />
           </motion.div>
         )}
 
@@ -362,6 +419,8 @@ export default function HotelDetailsPage() {
           <h2 className="mb-4 text-2xl font-semibold text-[#000000] dark:text-zinc-50">
             Nearby Attractions & Dining
           </h2>
+          
+          {/* Removed Ollama badge and error message per user request */}
               {loadingRecommendations ? (
             <div className="flex items-center justify-center py-8">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#4A70A9] border-t-transparent"></div>
@@ -373,16 +432,7 @@ export default function HotelDetailsPage() {
                   key={idx}
                   className="overflow-hidden rounded-lg border border-[#8FABD4]/40 bg-white/95 shadow-sm transition hover:shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
                 >
-                      <img
-                        src={resolveImageSrc(rec.imageUrl) || "https://via.placeholder.com/400x300"}
-                        alt={rec.name}
-                        onError={(e) => {
-                          const t = e.currentTarget as HTMLImageElement;
-                          if (t.src && !t.src.endsWith("/taal-gold.avif")) t.src = "/taal-gold.avif";
-                        }}
-                        className="h-32 w-full object-cover"
-                      />
-                  <div className="p-3">
+                  <div className="p-4">
                     <div className="mb-2 flex items-start justify-between">
                       <h3 className="flex-1 text-sm font-semibold text-[#000000] dark:text-zinc-50">
                         {rec.name}
@@ -392,7 +442,52 @@ export default function HotelDetailsPage() {
                       </span>
                     </div>
                     <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">{rec.description}</p>
-                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">📍 {rec.distance}</p>
+                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">📍 {rec.distance || (rec.lat && rec.lon ? formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : 'N/A')}</p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={async () => {
+                          // If we have coords, open immediately
+                          if (rec.lat && rec.lon) {
+                            setSelectedAttraction(rec);
+                            setMapOpen(true);
+                            return;
+                          }
+
+                          // Otherwise try to geocode by address or name
+                          const q = encodeURIComponent(rec.address || rec.name);
+                          if (!q) {
+                            window.alert('No coordinates or address available for this place.');
+                            return;
+                          }
+                          try {
+                            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`);
+                            if (!res.ok) throw new Error('Geocode failed');
+                            const data = await res.json();
+                            if (Array.isArray(data) && data.length > 0) {
+                              const loc = data[0];
+                              const lat = parseFloat(loc.lat);
+                              const lon = parseFloat(loc.lon);
+                              const augmented = { ...rec, lat, lon, distance: rec.distance || formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)), walkingTime: rec.walkingTime || formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)) } as NearbyRecommendation;
+                              setSelectedAttraction(augmented);
+                              setMapOpen(true);
+                              return;
+                            }
+                            window.alert('Could not find coordinates for this place.');
+                          } catch (e) {
+                            console.error('Geocode error', e);
+                            window.alert('Failed to look up place coordinates.');
+                          }
+                        }}
+                        className="rounded-md bg-[#4A70A9] px-3 py-1 text-xs font-semibold text-white hover:bg-[#4A70A9]/90"
+                      >
+                        View on map
+                      </button>
+
+                      {/* show walking time or compute fallback if coords available */}
+                      <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                        {rec.walkingTime || (rec.lat && rec.lon ? formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : '')}
+                      </span>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -402,6 +497,7 @@ export default function HotelDetailsPage() {
               No recommendations available
             </p>
           )}
+          
         </motion.div>
       </div>
 
@@ -455,6 +551,18 @@ export default function HotelDetailsPage() {
       </motion.div>
     </div>
   </motion.div>
+
+  {/* Attraction Map Dialog */}
+  <AttractionMapDialog
+    open={mapOpen}
+    onOpenChange={(o) => setMapOpen(o)}
+    hotel={{ lat: hotel.latitude, lon: hotel.longitude, name: hotel.name }}
+    attraction={
+      selectedAttraction && selectedAttraction.lat && selectedAttraction.lon
+        ? { lat: selectedAttraction.lat, lon: selectedAttraction.lon, name: selectedAttraction.name, distance: selectedAttraction.distance }
+        : null
+    }
+  />
 
   {/* Booking Modal */}
   <BookingModal

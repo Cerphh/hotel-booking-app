@@ -1,12 +1,19 @@
 /**
- * Ollama LLM Integration
- * Fetches nearby recommendations (restaurants, entertainment, attractions)
- * Requires Ollama running locally (default: http://localhost:11434)
+ * Ollama LLM Integration (clean)
+ * - Fetch nearby POIs from OpenStreetMap Overpass
+ * - Ask local Ollama to select + enrich up to 8 recommendations
+ *
+ * This module is client-safe (no Next.js server-only imports) so it can be
+ * imported from client components. Configure Ollama via env vars:
+ * - NEXT_PUBLIC_OLLAMA_API
+ * - NEXT_PUBLIC_OLLAMA_MODEL
  */
 
 export interface NearbyRecommendation {
   name: string;
   type: "restaurant" | "entertainment" | "attraction" | string;
+  lat?: number;
+  lon?: number;
   description: string;
   distance: string;
   walkingTime?: string;
@@ -20,167 +27,232 @@ export interface OllamaRecommendations {
   recommendations: NearbyRecommendation[];
   error?: string;
 }
+const OLLAMA_API = (process.env.NEXT_PUBLIC_OLLAMA_API as string) || "http://localhost:11434";
+const OLLAMA_MODEL = (process.env.NEXT_PUBLIC_OLLAMA_MODEL as string) || "mistral";
 
-const OLLAMA_API = process.env.NEXT_PUBLIC_OLLAMA_API || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.NEXT_PUBLIC_OLLAMA_MODEL || "mistral";
-
-export async function getNearbyRecommendations(
-  latitude: number,
-  longitude: number,
-  hotelName: string
-): Promise<OllamaRecommendations> {
+export async function getNearbyRecommendations(latitude: number, longitude: number, hotelName: string): Promise<OllamaRecommendations> {
   try {
-    const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" located at latitude ${latitude} and longitude ${longitude}. Recommend only real places that are walkable from this exact spot (roughly within 2 km). Skip famous Batangas-wide attractions unless they truly fall inside that radius. Prioritize restaurants, cafes, attractions, viewpoints, and entertainment that a traveler could realistically reach from the hotel. Sort results by nearest first and cap the list at 8 entries. If a place cannot be verified near the coordinates, omit it or mark confidence "low".
+    const pois = await fetchPOIsFromOverpass(latitude, longitude, 2000);
+    if (!pois || pois.length === 0) {
+      // No POIs found — return empty recommendations so UI shows no suggestions.
+      return { recommendations: [], error: "No POIs found" };
+    }
 
-  Return a single JSON object with a top-level "recommendations" array. Each recommendation must include: name, type (one of: restaurant, entertainment, attraction, cafe, viewpoint, other), description (1 short sentence), distance (explicit distance from the hotel in meters or km), walkingTime (estimate like "10 min walk"), reason (why it suits this traveler), and optionally address plus confidence. Example structure (follow exactly, do not add extra text):
+    // Build candidate lines including coordinates so the LLM can select by location
+    const candidateLines = pois.slice(0, 40).map((p, i) => `${i + 1}. ${p.name} | ${p.type} | ${formatDistance(p.distanceMeters)} | ${p.lat},${p.lon} | ${p.address || ""}`).join("\n");
+    const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" at latitude ${latitude}, longitude ${longitude}. Below is a numbered list of real nearby places (gathered from OpenStreetMap) with their type, distance, and coordinates. From this list, select up to 8 places that a traveler would actually visit (prioritize restaurants, cafes, attractions, viewpoints, entertainment). Sort results by nearest first.
 
-{
-  "recommendations": [
-    {"name":"Example Place","type":"attraction","description":"Short 1-sentence description.","distance":"0.5 km","walkingTime":"6 min","reason":"Scenic view of the bay","address":"123 Main St","confidence":"high"}
-  ]
+  Important: For each selected place include its latitude and longitude (use the coordinates from the candidate list if available). Return a single JSON object with a top-level "recommendations" array, each entry with these fields:
+  - name (string)
+  - type (string)
+  - description (one sentence)
+  - distance (e.g. "350 m")
+  - walkingTime (e.g. "6 min walk")
+  - lat (number)
+  - lon (number)
+  - reason (short explanation)
+  - address (optional)
+  - confidence ("high" or "low")
+
+  Candidates:
+  ${candidateLines}
+
+  Output only valid JSON. Do not include any extra commentary.`;
+
+    const res = await fetch(`${OLLAMA_API}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false, temperature: 0.2 }),
+    });
+
+    if (!res.ok) return { recommendations: buildRecommendationsFromPOIs(pois, hotelName), error: `Ollama error ${res.status}` };
+    const data: any = await res.json();
+    const text = data.response || data.text || JSON.stringify(data);
+
+    let parsed: any = null;
+    try { parsed = JSON.parse(text); } catch (e) {
+      const m = text.match(/"recommendations"\s*:\s*(\[[\s\S]*\])/i);
+      if (m && m[1]) {
+        try { parsed = { recommendations: JSON.parse(m[1]) }; } catch { parsed = null; }
+      }
+    }
+
+    if (parsed && Array.isArray(parsed.recommendations)) {
+      // Build lookups by normalized name and by rounded coordinates to attach coordinates
+      const poiMapByName = new Map<string, any>();
+      const poiMapByCoords = new Map<string, any>();
+      for (const p of pois) {
+        const key = (p.name || "").toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (!poiMapByName.has(key)) poiMapByName.set(key, p);
+        if (p.lat && p.lon) {
+          const ck = `${p.lat.toFixed(5)}|${p.lon.toFixed(5)}`;
+          if (!poiMapByCoords.has(ck)) poiMapByCoords.set(ck, p);
+        }
+      }
+
+      const recs: NearbyRecommendation[] = parsed.recommendations.slice(0, 8).map((r: any, idx: number) => {
+        // prefer lat/lon returned by LLM, else match by name or coords
+        let latNum: number | undefined = undefined;
+        let lonNum: number | undefined = undefined;
+        if (r.lat !== undefined && r.lon !== undefined) {
+          latNum = Number(r.lat);
+          lonNum = Number(r.lon);
+        } else if (r.coords) {
+          const parts = String(r.coords).split(/[,\s]+/).map((s: string) => s.trim());
+          if (parts.length >= 2) {
+            latNum = Number(parts[0]);
+            lonNum = Number(parts[1]);
+          }
+        }
+
+        let matched: any = null;
+        if (latNum && lonNum) {
+          const ck = `${latNum.toFixed(5)}|${lonNum.toFixed(5)}`;
+          matched = poiMapByCoords.get(ck);
+        }
+
+        if (!matched) {
+          const norm = (r.name || "").toString().toLowerCase().replace(/[^a-z0-9]/g, "");
+          matched = poiMapByName.get(norm);
+        }
+
+        const distanceMeters = matched?.distanceMeters ?? pois[idx]?.distanceMeters ?? 0;
+        return {
+          name: r.name,
+          type: r.type || (matched?.type ?? "other"),
+          description: r.description || (matched ? `Popular ${matched.type} ${matched.name}` : ""),
+          lat: latNum ?? matched?.lat,
+          lon: lonNum ?? matched?.lon,
+          distance: r.distance || formatDistance(distanceMeters),
+          walkingTime: r.walkingTime || formatWalkingTime(distanceMeters),
+          reason: r.reason || "",
+          address: r.address || matched?.address,
+          confidence: r.confidence || (distanceMeters <= 2000 ? "high" : "low"),
+          imageUrl: getUnsplashImageUrl(r.type || matched?.type || "other", idx),
+        } as NearbyRecommendation;
+      });
+
+      return { recommendations: recs };
+    }
+
+    // If we couldn't parse the LLM output, fall back to POIs if available, otherwise return empty
+    const fallback = buildRecommendationsFromPOIs(pois, hotelName);
+    if (fallback && fallback.length > 0) return { recommendations: fallback, error: "Could not parse LLM output" };
+    return { recommendations: [], error: "Could not parse LLM output" };
+  } catch (err) {
+    // On any unexpected error, return an empty list and surface the error
+    return { recommendations: [], error: (err as any)?.message || "Unknown error" };
+  }
 }
 
-Keep descriptions concise, tie each place to the provided coordinates, and output only the JSON object (no prose before or after).`;
+// Reuse helper implementations (same as earlier in file)
+export async function fetchPOIsFromOverpass(lat: number, lon: number, radius = 2000) {
+  try {
+    // Target dining and attraction-relevant tags to reduce noise
+    const q = `
+      [out:json][timeout:25];
+      (
+        // Dining
+        node(around:${radius},${lat},${lon})[amenity~"restaurant|cafe|bar|fast_food|pub|food_court"]["name"];
+        way(around:${radius},${lat},${lon})[amenity~"restaurant|cafe|bar|fast_food|pub|food_court"]["name"];
+        relation(around:${radius},${lat},${lon})[amenity~"restaurant|cafe|bar|fast_food|pub|food_court"]["name"];
+        // Attractions / sightseeing
+        node(around:${radius},${lat},${lon})[tourism~"attraction|museum|viewpoint|gallery|zoo"]["name"];
+        way(around:${radius},${lat},${lon})[tourism~"attraction|museum|viewpoint|gallery|zoo"]["name"];
+        relation(around:${radius},${lat},${lon})[tourism~"attraction|museum|viewpoint|gallery|zoo"]["name"];
+        // Parks / leisure
+        node(around:${radius},${lat},${lon})[leisure~"park|garden|playground"]["name"];
+        way(around:${radius},${lat},${lon})[leisure~"park|garden|playground"]["name"];
+        relation(around:${radius},${lat},${lon})[leisure~"park|garden|playground"]["name"];
+      );
+      out center;`;
 
-    const response = await fetch(`${OLLAMA_API}/api/generate`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt,
-        stream: false,
-        temperature: 0.2,
-      }),
-    });
+    const res = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `data=${encodeURIComponent(q)}` });
+    if (!res.ok) return [];
+    const j = await res.json();
+    if (!Array.isArray(j.elements)) return [];
 
-    if (!response.ok) {
-      console.warn(`Ollama API error: ${response.status}`);
-      return {
-        recommendations: getMockRecommendations(hotelName, latitude, longitude),
-        error: "Ollama service unavailable, using mock data",
-      };
-    }
-
-    const data = await response.json();
-    const responseText = data.response || data.text || JSON.stringify(data);
-
-    // Try to extract a JSON object that contains a "recommendations" key
-    const objMatch = responseText.match(/"recommendations"\s*:\s*(\[[\s\S]*\])/i);
-    let recommendations: NearbyRecommendation[] | null = null;
-
-    if (objMatch && objMatch[1]) {
-      try {
-        recommendations = JSON.parse(objMatch[1]) as NearbyRecommendation[];
-      } catch (err) {
-        console.warn("Failed to parse recommendations array, falling back to full JSON parse", err);
-      }
-    }
-
-    // As a fallback, try to parse a top-level object with recommendations
-    if (!recommendations) {
-      try {
-        const parsed = JSON.parse(responseText);
-        if (parsed && Array.isArray(parsed.recommendations)) {
-          recommendations = parsed.recommendations as NearbyRecommendation[];
-        }
-      } catch (err) {
-        console.warn("Could not parse JSON from Ollama response", err);
-      }
-    }
-
-    if (!recommendations) {
-      console.warn("Could not parse recommendations from Ollama response");
-      return {
-        recommendations: getMockRecommendations(hotelName, latitude, longitude),
-        error: "Could not parse recommendations",
-      };
-    }
-
-    // Verify and enrich recommendations with geocoding (Nominatim) to improve accuracy
-    const verified = await Promise.all(
-      recommendations.map(async (rec, idx) => {
-        try {
-          const geocoded = await geocodePlace(rec.name, latitude, longitude, rec.address || "");
-          const imageUrl = getUnsplashImageUrl(rec.type, idx);
-          return {
-            ...rec,
-            // prefer geocoded distance/address if available
-            distance: geocoded?.distanceStr || rec.distance,
-            walkingTime: geocoded?.walkingTime || rec.walkingTime,
-            address: geocoded?.address || rec.address,
-            confidence: geocoded?.confidence || (rec as any).confidence || "low",
-            imageUrl,
-          } as NearbyRecommendation & { confidence?: string };
-        } catch (e) {
-          return {
-            ...rec,
-            imageUrl: getUnsplashImageUrl(rec.type, idx),
-            confidence: (rec as any).confidence || "low",
-          } as NearbyRecommendation & { confidence?: string };
-        }
+    // Map raw elements to POIs and filter for real POI-like tags
+    const rawItems = j.elements
+      .map((el: any) => {
+        const name = el.tags?.name || el.tags?.["name:en"] || el.tags?.["name:local"];
+        if (!name) return null;
+        const latEl = el.lat ?? el.center?.lat;
+        const lonEl = el.lon ?? el.center?.lon;
+        if (!latEl || !lonEl) return null;
+        const tags = el.tags || {};
+        // Require at least one meaningful tag to avoid returning repeated hotel entries or unnamed nodes
+        const meaningful = tags.amenity || tags.tourism || tags.shop || tags.leisure || tags.historic || tags.natural;
+        if (!meaningful) return null;
+        const type = mapOsmTagsToType(tags);
+        const distanceMeters = haversineDistanceMeters(lat, lon, parseFloat(latEl), parseFloat(lonEl));
+        const address = buildAddressFromTags(tags);
+        return { name: name.trim(), type, lat: parseFloat(latEl), lon: parseFloat(lonEl), distanceMeters, address, tags };
       })
-    );
+      .filter(Boolean) as any[];
 
-    // Filter or sort: keep only places within 3 km, but if none are within range, return original list
-    const within3km = verified.filter((r) => {
-      const d = parseDistanceMeters(r.distance || "");
-      return d !== null && d <= 3000;
-    });
-
-    const finalRecommendations = within3km.length > 0 ? within3km : verified;
-
-    return { recommendations: finalRecommendations as NearbyRecommendation[] };
-  } catch (error) {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("Ollama fetch failed, serving mock data", error);
+    // Deduplicate by normalized name + rounded coordinates
+    const keyMap = new Map<string, any>();
+    for (const it of rawItems) {
+      const key = `${it.name.toLowerCase().replace(/[^a-z0-9]/g, "")}_${it.lat.toFixed(5)}_${it.lon.toFixed(5)}`;
+      if (!keyMap.has(key)) keyMap.set(key, it);
     }
-    return {
-      recommendations: getMockRecommendations(hotelName, latitude, longitude),
-      error: "Failed to fetch recommendations",
-    };
-  }
+
+    const items = Array.from(keyMap.values()).sort((a: any, b: any) => a.distanceMeters - b.distanceMeters);
+    return items;
+  } catch { return []; }
+}
+
+function mapOsmTagsToType(tags: Record<string, any>) {
+  if (!tags) return "other";
+  if (tags.amenity === "restaurant" || tags.amenity === "fast_food" || tags.cuisine) return "restaurant";
+  if (tags.amenity === "cafe" || (tags.cuisine && String(tags.cuisine).toLowerCase().includes("coffee"))) return "cafe";
+  if (tags.amenity === "bar" || tags.amenity === "pub") return "bar";
+  if (tags.tourism === "attraction" || tags.tourism === "museum" || tags.tourism === "viewpoint" || tags.tourism === "gallery" || tags.tourism === "zoo") return "attraction";
+  if (tags.leisure === "park" || tags.leisure === "garden" || tags.leisure === "playground") return "park";
+  if (tags.entertainment || tags.nightclub) return "entertainment";
+  return "other";
+}
+
+function buildAddressFromTags(tags: Record<string, any>) {
+  if (!tags) return undefined;
+  const parts: string[] = [];
+  if (tags["addr:housename"]) parts.push(tags["addr:housename"]);
+  if (tags["addr:housenumber"]) parts.push(tags["addr:housenumber"]);
+  if (tags["addr:street"]) parts.push(tags["addr:street"]);
+  if (tags["addr:city"]) parts.push(tags["addr:city"]);
+  if (parts.length === 0) return undefined;
+  return parts.join(", ");
+}
+
+function buildRecommendationsFromPOIs(pois: any[], hotelName?: string) {
+  return pois.slice(0, 8).map((p: any, idx: number) => ({
+    name: p.name,
+    type: p.type || "other",
+    description: `Popular ${p.type} ${p.name}`,
+    lat: p.lat,
+    lon: p.lon,
+    distance: formatDistance(p.distanceMeters),
+    walkingTime: formatWalkingTime(p.distanceMeters),
+    reason: `Close to ${hotelName}`,
+    address: p.address,
+    confidence: p.distanceMeters <= 2000 ? "high" : "low",
+    imageUrl: getUnsplashImageUrl(p.type || "other", idx),
+  } as NearbyRecommendation));
 }
 
 function getUnsplashImageUrl(type: string, index: number): string {
   const queries: Record<string, string[]> = {
     restaurant: ["restaurant", "food", "cuisine", "dining"],
-    entertainment: ["nightlife", "entertainment", "karaoke", "bar"],
+    cafe: ["cafe", "coffee", "cozy cafe", "coffee shop"],
+    bar: ["bar", "cocktails", "pub", "nightlife"],
+    entertainment: ["nightlife", "entertainment", "karaoke", "concert"],
     attraction: ["tourist attraction", "landmark", "park", "museum"],
+    park: ["park", "garden", "trees", "green space"],
   };
-
   const typeQueries = queries[type] || ["travel"];
   const query = typeQueries[index % typeQueries.length];
   return `https://source.unsplash.com/400x300/?${encodeURIComponent(query)},batangas`;
-}
-
-async function geocodePlace(name: string, hotelLat: number, hotelLon: number, hintAddress = "") {
-  try {
-    const q = encodeURIComponent(`${name} ${hintAddress}`.trim());
-    // Nominatim public instance - for production consider your own instance or a paid geocoding API
-    const url = `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "HotBook/1.0 (hotbook@example.com)" },
-    });
-    if (!res.ok) return null;
-    const j = await res.json();
-    if (!Array.isArray(j) || j.length === 0) return null;
-    const place = j[0];
-    const lat = parseFloat(place.lat);
-    const lon = parseFloat(place.lon);
-    if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
-
-    const meters = haversineDistanceMeters(hotelLat, hotelLon, lat, lon);
-    const distanceStr = meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(2)} km`;
-    const walkingMinutes = Math.max(1, Math.round((meters / 1000) / 5 * 60)); // 5 km/h walking speed
-    const walkingTime = `${walkingMinutes} min walk`;
-    const address = place.display_name || hintAddress || undefined;
-    const confidence = meters <= 3000 ? "high" : "low";
-    return { lat, lon, distance: meters, distanceStr, walkingTime, address, confidence };
-  } catch (err) {
-    return null;
-  }
 }
 
 function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -188,9 +260,7 @@ function haversineDistanceMeters(lat1: number, lon1: number, lat2: number, lon2:
   const R = 6371000; // meters
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -201,101 +271,21 @@ function parseDistanceMeters(distanceStr?: string | null) {
     const s = distanceStr.trim();
     if (s.endsWith("m")) return parseFloat(s.replace(/[^0-9.]/g, ""));
     if (s.endsWith("km")) return parseFloat(s.replace(/[^0-9.]/g, "")) * 1000;
-    // fallback: try number
     const n = parseFloat(s.replace(/[^0-9.]/g, ""));
     return Number.isFinite(n) ? n : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function getMockRecommendations(hotelName?: string, latitude?: number, longitude?: number): NearbyRecommendation[] {
-  const primaryName = hotelName?.split(",")[0]?.trim() || "your stay";
-  const areaName = hotelName?.split(",").slice(1).join(",").trim() || "the neighborhood";
-
-  const fallbackPlaces = [
-    {
-      name: `${primaryName} Courtyard Cafe`,
-      type: "cafe",
-      description: `Cozy espresso nook tucked beside ${primaryName}.`,
-      baseDistance: 80,
-      reason: "Grab coffee steps from the lobby",
-    },
-    {
-      name: `${areaName} Street Eats Lane`,
-      type: "restaurant",
-      description: `Cluster of sizzling ihaw-ihaw stalls loved by locals of ${areaName}.`,
-      baseDistance: 320,
-      reason: "Sample authentic street bites",
-    },
-    {
-      name: `Sunset Deck at ${primaryName}`,
-      type: "viewpoint",
-      description: `Rooftop perch overlooking ${areaName}'s coastline for golden-hour photos.`,
-      baseDistance: 650,
-      reason: "Unwind with skyline views",
-    },
-    {
-      name: `${areaName} Heritage Plaza`,
-      type: "attraction",
-      description: `Pocket park showcasing local artisans and weekend acoustic sets.`,
-      baseDistance: 1100,
-      reason: "Support neighborhood makers",
-    },
-    {
-      name: `${areaName} Vinyl & Vibes Bar`,
-      type: "entertainment",
-      description: `Under-the-radar speakeasy spinning OPM classics near ${primaryName}.`,
-      baseDistance: 1600,
-      reason: "Nightcap with live music",
-    },
-  ];
-
-  return fallbackPlaces.map((place, idx) => ({
-    name: place.name,
-    type: place.type,
-    description: place.description,
-    distance: formatDistance(place.baseDistance + idx * 40),
-    walkingTime: formatWalkingTime(place.baseDistance + idx * 40),
-    reason: place.reason,
-    address: areaName,
-    confidence: "medium",
-    imageUrl: getUnsplashImageUrl(place.type, idx),
-  }));
+  } catch { return null; }
 }
 
 function formatDistance(meters: number) {
-  if (meters < 1000) {
-    return `${Math.round(meters)} m`;
-  }
+  if (!Number.isFinite(meters)) return "";
+  if (meters < 1000) return `${Math.round(meters)} m`;
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
 function formatWalkingTime(meters: number) {
+  if (!Number.isFinite(meters)) return "";
   const minutes = Math.max(2, Math.round((meters / 1000) / 5 * 60));
   return `${minutes} min walk`;
 }
 
-import { NextResponse } from "next/server";
-
-export async function POST(req: Request) {
-  try {
-    const { latitude, longitude, hotelName } = await req.json();
-
-    if (!latitude || !longitude || !hotelName) {
-      return NextResponse.json(
-        { error: "latitude, longitude, and hotelName are required" },
-        { status: 400 }
-      );
-    }
-
-    const result = await getNearbyRecommendations(latitude, longitude, hotelName);
-    return NextResponse.json(result);
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Failed to process request" },
-      { status: 500 }
-    );
-  }
-}
-
+// Mock fallback removed per user request — only return real POIs or empty list.
