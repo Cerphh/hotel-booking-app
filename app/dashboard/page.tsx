@@ -761,38 +761,38 @@ export default function Dashboard() {
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-3 md:text-sm">
-            <Card className="border-none bg-[#8FABD4]/25 px-3 py-3 shadow-none dark:bg-[#4A70A9]/40">
-              <CardHeader className="p-0 pb-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 items-stretch text-xs md:text-sm">
+            <Card className="border-none bg-[#8FABD4]/25 px-3 py-3 shadow-none dark:bg-[#4A70A9]/40 h-full flex flex-col">
+              <CardHeader className="p-0 pb-1 flex-none">
                 <CardTitle className="text-[11px] font-medium text-[#4A70A9] dark:text-[#EFECE3]">
                   Upcoming stay
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-0 text-[13px] font-semibold text-[#000000] dark:text-[#EFECE3]">
-                {upcomingBooking ? upcomingBooking.hotelName : "No trips yet"}
+              <CardContent className="p-0 text-[13px] font-semibold text-[#000000] dark:text-[#EFECE3] flex-1 flex items-center">
+                <div className="w-full">{upcomingBooking ? upcomingBooking.hotelName : "No trips yet"}</div>
               </CardContent>
             </Card>
 
-            <Card className="border-none bg-[#EFECE3] px-3 py-3 shadow-none dark:bg-[#4A70A9]">
-              <CardHeader className="p-0 pb-1">
+            <Card className="border-none bg-[#EFECE3] px-3 py-3 shadow-none dark:bg-[#4A70A9] h-full flex flex-col">
+              <CardHeader className="p-0 pb-1 flex-none">
                 <CardTitle className="text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
                   Total bookings
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-0 text-[20px] font-semibold text-[#000000] dark:text-zinc-50">
-                {bookings.length}
+              <CardContent className="p-0 text-[20px] font-semibold text-[#000000] dark:text-zinc-50 flex-1 flex items-center justify-center">
+                <div className="w-full text-center text-[20px] leading-none">{bookings.length}</div>
               </CardContent>
             </Card>
 
-              <div className="col-span-2 md:col-span-1 flex flex-col gap-3">
-              <Card className="border-none bg-[#4A70A9]/10 px-3 py-3 shadow-none dark:bg-[#4A70A9]/35">
-                <CardHeader className="p-0 pb-1">
+              <div className="flex flex-col gap-3">
+              <Card className="border-none bg-[#4A70A9]/10 px-3 py-3 shadow-none dark:bg-[#4A70A9]/35 h-full flex flex-col">
+                <CardHeader className="p-0 pb-1 flex-none">
                   <CardTitle className="text-[11px] font-medium text-[#4A70A9] dark:text-[#EFECE3]">
                     Saved hotels
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 text-[20px] font-semibold text-[#4A70A9] dark:text-[#EFECE3]">
-                  {favorites.length}
+                <CardContent className="p-0 text-[20px] font-semibold text-[#4A70A9] dark:text-[#EFECE3] flex-1 flex items-center justify-center">
+                  <div className="w-full text-center text-[20px] leading-none">{favorites.length}</div>
                 </CardContent>
               </Card>
             </div>
