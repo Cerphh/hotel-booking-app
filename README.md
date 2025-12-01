@@ -1,36 +1,66 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HotBook — Hotel Booking App (Draft README)
 
-## Getting Started
+HotBook is a small hotel booking demo built with Next.js (App Router). It demonstrates hotel listings, a booking flow, nearby recommendations (via Ollama / OpenAI fallback + Overpass), and simple Firebase authentication.
 
-First, run the development server:
+## Features
+- Hotel list with card/map view
+- Hotel details + nearby recommendations
+- Booking modal and pending bookings store
+- Google sign-in (Firebase Auth)
+- Ollama (local) integration for recommendations, with OpenAI fallback
+
+## Quickstart — Local development
+
+Prerequisites:
+- Node 18+ and a package manager (npm/yarn/pnpm)
+- Optional: Ollama (if you want LLM-powered recommendations) — https://ollama.ai
+
+1. Clone the repo
+
+```bash
+git clone https://github.com/Cerphh/hotel-booking-app.git
+cd hotel-booking-app
+```
+
+2. Install dependencies
+
+```bash
+npm install
+# or: pnpm install
+```
+
+3. Create `.env.local` (optional values shown)
+
+```env
+# Ollama (local LLM server) — defaults to http://localhost:11434
+NEXT_PUBLIC_OLLAMA_API=http://localhost:11434
+NEXT_PUBLIC_OLLAMA_MODEL=mistral
+
+# (Optional) OpenAI fallback for server-side recommendation debugging
+# OPENAI_API_KEY=sk-...
+# OPENAI_MODEL=gpt-4o-mini
+```
+
+4. Start Ollama (if using it)
+
+```bash
+# in a separate terminal
+ollama serve
+ollama pull mistral
+```
+
+5. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Notes
+- Bookings are stored in an in-memory pending store for demo purposes (`app/api/pending`).
+- Firebase config is currently embedded in `lib/firebase.ts`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For deeper, developer-oriented documentation see `TECHNICAL_DOCUMENTATION.md`.
