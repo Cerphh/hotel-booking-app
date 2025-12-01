@@ -121,18 +121,54 @@ export async function GET(request: Request) {
               if (tags['addr:street']) addressParts.push(tags['addr:street']);
               if (tags['addr:city']) addressParts.push(tags['addr:city']);
               const address = addressParts.length ? addressParts.join(', ') : undefined;
-              return { name: name.trim(), type, lat: parseFloat(latEl), lon: parseFloat(lonEl), distanceMeters, address };
+                // include cuisine/tourism tags where available for richer descriptions
+                const cuisine = tags.cuisine || tags['cuisine:primary'] || undefined;
+                return { name: name.trim(), type, lat: parseFloat(latEl), lon: parseFloat(lonEl), distanceMeters, address, cuisine, rawTags: tags };
             })
             .filter(Boolean) as any[];
 
-          // Filter for items within 5000m (<= 5km) from the hotel, sort by distance ascending
-          const nearItems = rawItems.filter((p) => Number.isFinite(p.distanceMeters) && p.distanceMeters <= 5000).sort((a, b) => a.distanceMeters - b.distanceMeters);
+            // Remove any undesirable or noisy POI names (blacklist)
+            const blacklist = [
+              /omg\s*olvida/i,
+              /myras?\s*grill/i,
+              /trattoria\s*altrov(?:e|é)?/i,
+              /casa\s*azul\s*caf(?:e|é)?/i,
+            ];
+
+            const cleanedItems = rawItems.filter((p) => {
+              if (!p || !p.name) return false;
+              return !blacklist.some((rx) => rx.test(p.name));
+            });
+
+            // Filter for items within 5000m (<= 5km) from the hotel, sort by distance ascending
+            const nearItems = cleanedItems.filter((p) => Number.isFinite(p.distanceMeters) && p.distanceMeters <= 5000).sort((a, b) => a.distanceMeters - b.distanceMeters);
 
           if (nearItems.length > 0) {
+            // Build a brief human-friendly one-line description for each POI.
+            const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+            const briefDescriptionFor = (p: any) => {
+              const t = String(p.type || '').toLowerCase();
+              const cuisineRaw = p.cuisine ? String(p.cuisine) : '';
+              const cuisine = cuisineRaw.split(';')[0]?.trim();
+              if (t === 'restaurant') {
+                if (cuisine) return `${capitalize(cuisine)} restaurant`;
+                return 'Restaurant serving local dishes';
+              }
+              if (t === 'cafe') {
+                if (cuisine) return `${capitalize(cuisine)} cafe`;
+                return 'Cafe and coffee shop';
+              }
+              if (t === 'bar' || t === 'pub') return 'Bar and nightlife spot';
+              if (t === 'attraction') return 'Popular local attraction';
+              if (t === 'park') return 'Public park';
+              return 'Place to visit';
+            };
+
             const recommendations = nearItems.slice(0, 12).map((p: any, idx: number) => ({
               name: p.name,
               type: p.type || 'other',
-              description: `Notable ${p.type} ${p.name}`,
+              // brief one-line description using cuisine/tags when available
+              description: briefDescriptionFor(p),
               distance: formatDistanceForPrompt(p.distanceMeters),
               walkingTime: (p.distanceMeters && p.distanceMeters >= 0) ? `${Math.max(2, Math.round((p.distanceMeters/1000)/5*60))} min walk` : '',
               lat: p.lat,
@@ -154,7 +190,8 @@ export async function GET(request: Request) {
       const sampleAttraction = {
         name: 'Taal Volcano Viewpoint',
         type: 'attraction',
-        description: 'Scenic viewpoint overlooking Taal Volcano and crater lake.',
+        // brief descriptive label
+        description: 'Scenic viewpoint overlooking Taal Volcano',
         distance: '1.8 km',
         walkingTime: '22 min walk',
         lat: latNum + 0.016, // ~1.8km north-ish
@@ -167,8 +204,9 @@ export async function GET(request: Request) {
 
       const sampleRestaurant = {
         name: 'Casa Batangas Cafe',
-        type: 'restaurant',
-        description: 'Cozy local cafe serving traditional Filipino breakfasts and coffee.',
+        type: 'cafe',
+        // brief descriptive label
+        description: 'Cozy cafe serving Filipino breakfasts and coffee',
         distance: '350 m',
         walkingTime: '5 min walk',
         lat: latNum + 0.003, // ~300m

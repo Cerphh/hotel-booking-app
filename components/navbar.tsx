@@ -12,6 +12,7 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ThemeToggle } from "./theme-toggle";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Menu } from "lucide-react";
 import { useState } from "react";
 import { usePathname } from "next/navigation"; // <-- to detect current page
@@ -21,6 +22,7 @@ export function Navbar() {
   const { user, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const pathname = usePathname(); // current path
+  const router = useRouter();
   const isAdmin = user?.email?.toLowerCase() === "admin@gmail.com";
 
   const handleLogout = async () => {
@@ -39,14 +41,21 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <Link href="/hotels" className="flex items-center space-x-2">
+          <a
+            href="/hotels"
+            onClick={(e) => {
+              e.preventDefault();
+              router.push("/hotels");
+            }}
+            className="flex items-center space-x-2"
+          >
             <div className="w-8 h-8 bg-linear-to-br from-[#4A70A9] to-[#8FABD4] rounded-lg flex items-center justify-center shadow-sm">
               <span className="text-[#EFECE3] font-bold text-lg">H</span>
             </div>
             <span className="hidden text-lg font-semibold tracking-tight text-[#000000] dark:text-white sm:inline">
               HotBook
             </span>
-          </Link>
+          </a>
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-4">
@@ -67,9 +76,13 @@ export function Navbar() {
                 }
 
                 return (
-                  <Link
+                  <a
                     key={link.href}
                     href={link.href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      router.push(link.href);
+                    }}
                     className={`px-4 py-2 text-sm font-medium transition rounded-full
                       ${
                         pathname === link.href
@@ -78,7 +91,7 @@ export function Navbar() {
                       }`}
                   >
                     {link.label}
-                  </Link>
+                  </a>
                 );
               })}
           </div>
@@ -161,9 +174,14 @@ export function Navbar() {
                 }
 
                 return (
-                  <Link
+                  <a
                     key={link.href}
                     href={link.href}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMobileMenuOpen(false);
+                      router.push(link.href);
+                    }}
                     className={`block rounded-full px-4 py-2 text-sm font-medium transition
                       ${
                         pathname === link.href
@@ -172,7 +190,7 @@ export function Navbar() {
                       }`}
                   >
                     {link.label}
-                  </Link>
+                  </a>
                 );
               })}
           </div>
