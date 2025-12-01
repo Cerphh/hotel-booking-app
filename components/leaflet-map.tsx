@@ -90,14 +90,13 @@ export default function LeafletMap({
   return (
     <MapContainer
       id={containerId.current}
-      key={`${containerId.current}-${lat}-${lon}-${Date.now()}`}
+      key={`${containerId.current}-${lat}-${lon}`}
       center={[lat, lon]}
       zoom={16}
       scrollWheelZoom
       style={{ width: "100%", height: "100%", zIndex: 0 }}
-      whenCreated={(m) => {
-        setMap(m);
-        mapRef.current = m;
+      whenReady={(mapInstance) => {
+        mapRef.current = mapInstance.target;
       }}
     >
       <TileLayer
