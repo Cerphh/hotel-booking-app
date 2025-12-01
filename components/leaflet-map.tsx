@@ -95,9 +95,6 @@ export default function LeafletMap({
       zoom={16}
       scrollWheelZoom
       style={{ width: "100%", height: "100%", zIndex: 0 }}
-      whenReady={(mapInstance) => {
-        mapRef.current = mapInstance.target;
-      }}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
