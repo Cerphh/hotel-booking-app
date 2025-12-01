@@ -37,7 +37,7 @@ export default function AttractionMapDialog({ open, onOpenChange, hotel, attract
     ? haversineDistanceMeters(hotel.lat, hotel.lon, attraction.lat, attraction.lon)
     : NaN;
   const distanceLabel = Number.isFinite(distanceMeters) ? formatDistance(distanceMeters) : attraction?.distance || "";
-  const walkingLabel = Number.isFinite(distanceMeters) ? formatWalkingTime(distanceMeters) : attraction?.walkingTime || "";
+  const walkingLabel = Number.isFinite(distanceMeters) ? formatWalkingTime(distanceMeters) : "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
