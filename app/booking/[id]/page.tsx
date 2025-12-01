@@ -421,82 +421,84 @@ export default function HotelDetailsPage() {
           </h2>
           
           {/* Removed Ollama badge and error message per user request */}
-              {loadingRecommendations ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#4A70A9] border-t-transparent"></div>
-            </div>
-          ) : recommendations.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {recommendations.map((rec, idx) => (
-                <div
-                  key={idx}
-                  className="overflow-hidden rounded-lg border border-[#8FABD4]/40 bg-white/95 shadow-sm transition hover:shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
-                >
-                  <div className="p-4">
-                    <div className="mb-2 flex items-start justify-between">
-                      <h3 className="flex-1 text-sm font-semibold text-[#000000] dark:text-zinc-50">
-                        {rec.name}
-                      </h3>
-                      <span className="ml-2 shrink-0 rounded-full bg-[#8FABD4]/20 px-2 py-1 text-xs font-medium text-[#4A70A9] dark:bg-[#4A70A9]/30 dark:text-[#EFECE3]">
-                        {rec.type}
-                      </span>
-                    </div>
-                    <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">{rec.description}</p>
-                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">📍 {rec.distance || (rec.lat && rec.lon ? formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : 'N/A')}</p>
-                    <div className="mt-3 flex items-center gap-2">
-                      <button
-                        onClick={async () => {
-                          // If we have coords, open immediately
-                          if (rec.lat && rec.lon) {
-                            setSelectedAttraction(rec);
-                            setMapOpen(true);
-                            return;
-                          }
-
-                          // Otherwise try to geocode by address or name
-                          const q = encodeURIComponent(rec.address || rec.name);
-                          if (!q) {
-                            window.alert('No coordinates or address available for this place.');
-                            return;
-                          }
-                          try {
-                            const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`);
-                            if (!res.ok) throw new Error('Geocode failed');
-                            const data = await res.json();
-                            if (Array.isArray(data) && data.length > 0) {
-                              const loc = data[0];
-                              const lat = parseFloat(loc.lat);
-                              const lon = parseFloat(loc.lon);
-                              const augmented = { ...rec, lat, lon, distance: rec.distance || formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)), walkingTime: rec.walkingTime || formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)) } as NearbyRecommendation;
-                              setSelectedAttraction(augmented);
+          <div className="mt-4 max-h-96 overflow-y-auto pr-2">
+            {loadingRecommendations ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#4A70A9] border-t-transparent"></div>
+              </div>
+            ) : recommendations.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {recommendations.map((rec, idx) => (
+                  <div
+                    key={idx}
+                    className="overflow-hidden rounded-lg border border-[#8FABD4]/40 bg-white/95 shadow-sm transition hover:shadow-md dark:border-[#8FABD4]/40 dark:bg-zinc-900/95"
+                  >
+                    <div className="p-4">
+                      <div className="mb-2 flex items-start justify-between">
+                        <h3 className="flex-1 text-sm font-semibold text-[#000000] dark:text-zinc-50">
+                          {rec.name}
+                        </h3>
+                        <span className="ml-2 shrink-0 rounded-full bg-[#8FABD4]/20 px-2 py-1 text-xs font-medium text-[#4A70A9] dark:bg-[#4A70A9]/30 dark:text-[#EFECE3]">
+                          {rec.type}
+                        </span>
+                      </div>
+                      <p className="mb-2 text-xs text-zinc-600 dark:text-zinc-400">{rec.description}</p>
+                      <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">📍 {rec.distance || (rec.lat && rec.lon ? formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : 'N/A')}</p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          onClick={async () => {
+                            // If we have coords, open immediately
+                            if (rec.lat && rec.lon) {
+                              setSelectedAttraction(rec);
                               setMapOpen(true);
                               return;
                             }
-                            window.alert('Could not find coordinates for this place.');
-                          } catch (e) {
-                            console.error('Geocode error', e);
-                            window.alert('Failed to look up place coordinates.');
-                          }
-                        }}
-                        className="rounded-md bg-[#4A70A9] px-3 py-1 text-xs font-semibold text-white hover:bg-[#4A70A9]/90"
-                      >
-                        View on map
-                      </button>
 
-                      {/* show walking time or compute fallback if coords available */}
-                      <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                        {rec.walkingTime || (rec.lat && rec.lon ? formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : '')}
-                      </span>
+                            // Otherwise try to geocode by address or name
+                            const q = encodeURIComponent(rec.address || rec.name);
+                            if (!q) {
+                              window.alert('No coordinates or address available for this place.');
+                              return;
+                            }
+                            try {
+                              const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`);
+                              if (!res.ok) throw new Error('Geocode failed');
+                              const data = await res.json();
+                              if (Array.isArray(data) && data.length > 0) {
+                                const loc = data[0];
+                                const lat = parseFloat(loc.lat);
+                                const lon = parseFloat(loc.lon);
+                                const augmented = { ...rec, lat, lon, distance: rec.distance || formatDistance(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)), walkingTime: rec.walkingTime || formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, lat, lon)) } as NearbyRecommendation;
+                                setSelectedAttraction(augmented);
+                                setMapOpen(true);
+                                return;
+                              }
+                              window.alert('Could not find coordinates for this place.');
+                            } catch (e) {
+                              console.error('Geocode error', e);
+                              window.alert('Failed to look up place coordinates.');
+                            }
+                          }}
+                          className="rounded-md bg-[#4A70A9] px-3 py-1 text-xs font-semibold text-white hover:bg-[#4A70A9]/90"
+                        >
+                          View on map
+                        </button>
+
+                        {/* show walking time or compute fallback if coords available */}
+                        <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                          {rec.walkingTime || (rec.lat && rec.lon ? formatWalkingTime(haversineDistanceMeters(hotel.latitude, hotel.longitude, rec.lat, rec.lon)) : '')}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
-              No recommendations available
-            </p>
-          )}
+                ))}
+              </div>
+            ) : (
+              <p className="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">
+                No recommendations available
+              </p>
+            )}
+          </div>
           
         </motion.div>
       </div>
