@@ -56,12 +56,36 @@ interface HotelItem {
   long?: number;
 }
 
+interface BookingItem {
+  id?: string;
+  hotelId?: string;
+  hotelName?: string;
+  hotelImage?: string;
+  userEmail?: string;
+  userId?: string;
+  userName?: string;
+  checkIn?: string;
+  checkOut?: string;
+  guests?: number;
+  rooms?: number;
+  roomType?: string;
+  bookingType?: string;
+  totalPrice?: number;
+  status?: string;
+  bookingDate?: string;
+  createdAt?: any;
+}
+
 export default function AdminPage() {
   // The UI-level ErrorBoundary is defined at module scope below and used to wrap the admin UI.
   const { user, loading } = useAuth();
   const [hotels, setHotels] = useState<HotelItem[]>([]);
   const [loadingHotels, setLoadingHotels] = useState(true);
   const [totalHotels, setTotalHotels] = useState<number | null>(null);
+  const [totalBookings, setTotalBookings] = useState<number | null>(null);
+  const [bookings, setBookings] = useState<BookingItem[]>([]);
+  const [loadingBookings, setLoadingBookings] = useState(true);
+  const [showBookings, setShowBookings] = useState(false);
   
   // form state removed — add hotel UI moved into the navbar dialog
 
@@ -222,10 +246,41 @@ export default function AdminPage() {
     }
   }, [db]);
 
+  const fetchBookings = useCallback(async () => {
+    try {
+      setLoadingBookings(true);
+      // Order by createdAt if available, otherwise fallback to bookingDate
+      let q;
+      try {
+        q = query(collection(db, "bookings"), orderBy("createdAt", "desc"));
+      } catch (e) {
+        q = query(collection(db, "bookings"));
+      }
+      const snap = await getDocs(q as any);
+      const data: BookingItem[] = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+      setBookings(data);
+      setTotalBookings(data.length);
+    } catch (err) {
+      console.error("Failed to fetch bookings:", err);
+      setBookings([]);
+      setTotalBookings(null);
+    } finally {
+      setLoadingBookings(false);
+    }
+  }, [db]);
+
   // (bookings/users counts removed — only total hotels shown)
   // If you later want bookings/users counts, reintroduce aggregate queries here.
   const fetchCounts = useCallback(async () => {
-    return;
+    try {
+      // Fetch a simple total of bookings from Firestore
+      const q = query(collection(db, "bookings"));
+      const snap = await getDocs(q);
+      setTotalBookings(snap.size);
+    } catch (err) {
+      console.error("Failed to fetch counts:", err);
+      setTotalBookings(null);
+    }
   }, [db]);
 
   // dialog state for per-hotel actions
@@ -248,6 +303,7 @@ export default function AdminPage() {
       fetchHotels();
       fetchCounts();
       fetchPendingHotels();
+      fetchBookings();
     }
 
     const onAdded = () => {
@@ -264,11 +320,20 @@ export default function AdminPage() {
       }
     };
 
+    const onBookingAdded = () => {
+      if ((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) {
+        fetchBookings();
+        fetchCounts();
+      }
+    };
+
     window.addEventListener("hotbook:hotel-added", onAdded);
     window.addEventListener("hotbook:pending-hotel-added", onPendingAdded);
+    window.addEventListener("hotbook:booking-added", onBookingAdded);
     return () => {
       window.removeEventListener("hotbook:hotel-added", onAdded);
       window.removeEventListener("hotbook:pending-hotel-added", onPendingAdded);
+      window.removeEventListener("hotbook:booking-added", onBookingAdded);
     };
   }, [user, loading, fetchHotels, fetchCounts, fetchPendingHotels, adminSignedIn]);
 
@@ -381,6 +446,46 @@ export default function AdminPage() {
     }
   };
 
+  // Accept a booking (mark as accepted in Firestore)
+  const acceptBooking = async (b: BookingItem) => {
+    if (!b.id) return;
+    if (!confirm(`Approve booking for ${b.hotelName || b.userEmail}?`)) return;
+    try {
+      const acceptedBy = user?.email ?? 'admin';
+      const acceptedAt = new Date().toISOString();
+      const targetRef = doc(db, "bookings", String(b.id));
+      await setDoc(targetRef, { status: 'accepted', acceptedBy, acceptedAt }, { merge: true });
+      // update local list
+      setBookings((prev) => (prev || []).map((x) => (String(x.id) === String(b.id) ? { ...x, status: 'accepted', acceptedBy, acceptedAt } : x)));
+      try { window.dispatchEvent(new CustomEvent('hotbook:booking-updated', { detail: { id: String(b.id), status: 'accepted' } })); } catch {}
+      fetchCounts();
+      alert('Booking approved.');
+    } catch (err) {
+      console.error('Failed to accept booking:', err);
+      alert('Failed to accept booking. See console for details.');
+    }
+  };
+
+  // Reject a booking (mark as rejected in Firestore)
+  const rejectBooking = async (b: BookingItem) => {
+    if (!b.id) return;
+    if (!confirm(`Reject booking for ${b.hotelName || b.userEmail}?`)) return;
+    try {
+      const rejectedBy = user?.email ?? 'admin';
+      const rejectedAt = new Date().toISOString();
+      const targetRef = doc(db, "bookings", String(b.id));
+      await setDoc(targetRef, { status: 'rejected', rejectedBy, rejectedAt }, { merge: true });
+      // update local list
+      setBookings((prev) => (prev || []).map((x) => (String(x.id) === String(b.id) ? { ...x, status: 'rejected', rejectedBy, rejectedAt } : x)));
+      try { window.dispatchEvent(new CustomEvent('hotbook:booking-updated', { detail: { id: String(b.id), status: 'rejected' } })); } catch {}
+      fetchCounts();
+      alert('Booking rejected.');
+    } catch (err) {
+      console.error('Failed to reject booking:', err);
+      alert('Failed to reject booking. See console for details.');
+    }
+  };
+
   
 
   // Handler for lightweight admin sign-in
@@ -488,8 +593,14 @@ export default function AdminPage() {
         {/* Top stats: total hotels, bookings, users */}
         {((user && user.email?.toLowerCase() === ADMIN_EMAIL) || adminSignedIn) && (
           <div className="flex items-center justify-center mb-6 h-[60vh]">
-            <div className="p-0 text-center mx-auto">
-              <Donut count={totalHotels} label="Total hotels" onActivate={() => setShowHotels(true)} />
+            <div className="flex flex-col sm:flex-row gap-6 items-center justify-center w-full">
+              <div className="p-0 text-center mx-auto">
+                <Donut count={totalHotels} label="Total hotels" onActivate={() => setShowHotels(true)} />
+              </div>
+
+              <div className="p-0 text-center mx-auto">
+                <Donut count={totalBookings} label="Total bookings" onActivate={() => setShowBookings(true)} />
+              </div>
             </div>
           </div>
         )}
@@ -588,6 +699,56 @@ export default function AdminPage() {
                           <Button variant="ghost" size="sm" onClick={() => handleViewMap(h)} title="View map" aria-label={`View map for ${h.name}`}>
                             <MapPin className="h-4 w-4" />
                           </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Bookings dialog (opens when clicking the bookings donut) */}
+          <Dialog open={showBookings} onOpenChange={setShowBookings}>
+            <DialogContent className="w-[90vw] max-w-3xl p-4">
+              <DialogHeader>
+                <DialogTitle>Bookings</DialogTitle>
+              </DialogHeader>
+              {loadingBookings ? (
+                <p>Loading bookings...</p>
+              ) : bookings.length === 0 ? (
+                <p className="text-sm text-zinc-600">No bookings found.</p>
+              ) : (
+                <div className="grid gap-3 max-h-[60vh] overflow-y-auto">
+                  {bookings.map((b) => (
+                    <Card key={b.id}>
+                      <CardContent className="flex items-center justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          {b.hotelImage ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={b.hotelImage} alt={b.hotelName || "booking"} className="w-20 h-14 object-cover rounded-md" />
+                          ) : (
+                            <div className="w-20 h-14 bg-zinc-100 dark:bg-zinc-800 rounded-md flex items-center justify-center text-xs text-zinc-500">No image</div>
+                          )}
+
+                          <div>
+                            <p className="font-semibold">{b.hotelName}</p>
+                            <p className="text-sm text-zinc-600">{b.userName ?? b.userEmail}</p>
+
+                            <div className="mt-2 text-xs text-zinc-600">
+                              <div><strong>Dates:</strong> {b.checkIn ?? 'N/A'} → {b.checkOut ?? 'N/A'}</div>
+                              <div><strong>Rooms:</strong> {b.rooms ?? 'N/A'}</div>
+                              <div className="truncate"><strong>Total:</strong> {typeof b.totalPrice === 'number' ? `₱${b.totalPrice.toLocaleString()}` : (b.totalPrice ? `₱${b.totalPrice}` : 'N/A')}</div>
+                              <div><strong>Status:</strong> {(b.status ?? 'pending')}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-end text-right text-xs text-zinc-600 gap-2">
+                          <div>{b.bookingDate ? new Date(String(b.bookingDate)).toLocaleString() : (b.createdAt?.toDate ? b.createdAt.toDate().toLocaleString() : '')}</div>
+                          <div className="mt-1 text-xs text-zinc-500">{b.id}</div>
+
+                          {/* Buttons removed: admin bookings are view-only here. Use accept/reject actions elsewhere if needed. */}
                         </div>
                       </CardContent>
                     </Card>

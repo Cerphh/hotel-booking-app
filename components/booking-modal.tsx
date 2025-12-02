@@ -95,7 +95,8 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
         roomType: selectedRoomType?.name,
         bookingType,
         totalPrice,
-        status: "confirmed",
+        // Mark new bookings as 'pending' so admins can review/accept/reject them
+        status: "pending",
         bookingDate: new Date().toISOString(),
         createdAt: serverTimestamp(),
       };
@@ -115,7 +116,7 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
 
       await addDoc(collection(db, "bookings"), bookingData);
       
-      toast.success(`Booking confirmed for ${hotel.name}!`);
+      toast.success(`Booking submitted for ${hotel.name}. Awaiting admin review.`);
       onBook();
       onClose();
     } catch (error) {

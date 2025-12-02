@@ -103,6 +103,7 @@ interface Booking {
   price?: number;
   rating?: number;
   hotelId?: string;
+  status?: string;
 }
 
 interface Hotel {
@@ -418,6 +419,8 @@ export default function Dashboard() {
             availability: raw.availability,
             price: raw.price,
             rating: raw.rating ?? undefined,
+              // include server-side status so the UI can reflect admin actions
+              status: raw.status ?? undefined,
             hotelId: raw.hotelId || raw.hotel?.id || raw.hotel_id || undefined,
           } as Booking;
 
@@ -1198,13 +1201,28 @@ export default function Dashboard() {
                             >
                               Edit
                             </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => setCancelConfirmBooking(booking)}
-                            >
-                              Cancel
-                            </Button>
+                            {/* Show action based on booking status: allow cancel when pending, otherwise show accepted/rejected state */}
+                            {(((booking as any)?.status) ?? 'pending') === 'pending' ? (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => setCancelConfirmBooking(booking)}
+                              >
+                                Cancel
+                              </Button>
+                            ) : (((booking as any)?.status) === 'accepted') ? (
+                              <Button size="sm" disabled className="bg-green-600 text-white">
+                                Accepted
+                              </Button>
+                            ) : (((booking as any)?.status) === 'rejected') ? (
+                              <Button size="sm" disabled className="bg-rose-600 text-white">
+                                Rejected
+                              </Button>
+                            ) : (
+                              <Button size="sm" disabled>
+                                {(booking as any)?.status ?? '—'}
+                              </Button>
+                            )}
                           </div>
                         </div>
                       </Card>
