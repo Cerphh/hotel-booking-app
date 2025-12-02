@@ -260,28 +260,45 @@ export default function Dashboard() {
         const hotelSnap = await getDoc(hotelDocRef as any);
         if (!hotelSnap.exists()) return;
         const h = hotelSnap.data() as any;
-        const currentAvg = Number(h.rating ?? h.avgRating ?? 0);
-        const count = Number(h.reviewCount ?? h.reviews ?? 0);
+        // h.rating in the database might be either an average (0-5) or a total sum
+        // (e.g., 8 from two 4-star reviews). Handle both cases safely by deriving
+        // the current total sum and count, then computing the new average.
+        const rawRatingVal = h.rating ?? h.avgRating ?? 0;
+        const rawCountVal = Number(h.reviewCount ?? h.reviews ?? 0);
 
-        let newCount = count;
-        let newAvg = currentAvg;
+        const isStoredAsTotal = typeof rawRatingVal === "number" && rawRatingVal > 5 && rawCountVal > 0;
+
+        // derive current total sum of ratings
+        let currentTotal = 0;
+        if (isStoredAsTotal) {
+          currentTotal = Number(rawRatingVal);
+        } else {
+          // if stored as average, total = avg * count
+          currentTotal = Number(rawRatingVal) * rawCountVal;
+        }
+
+        let newCount = rawCountVal;
+        let newTotal = currentTotal;
 
         if (oldRating === undefined || oldRating === null) {
-          // new review
-          newCount = count + 1;
-          newAvg = (currentAvg * count + rating) / newCount;
+          // new review: increment count and add to total
+          newCount = rawCountVal + 1;
+          newTotal = currentTotal + rating;
         } else {
-          // updating existing review: adjust average without changing count
-          if (count <= 0) {
+          // updating existing review: keep count same, replace old rating in total
+          if (rawCountVal <= 0) {
             newCount = 1;
-            newAvg = rating;
+            newTotal = rating;
           } else {
-            newAvg = (currentAvg * count - oldRating + rating) / count;
+            newTotal = currentTotal - Number(oldRating) + rating;
           }
         }
 
+        const newAvg = newCount > 0 ? Number((newTotal / newCount).toFixed(1)) : 0;
+
         await updateDoc(hotelDocRef as any, {
-          rating: Number(newAvg.toFixed(1)),
+          // always persist the average (0-5) so the UI can read it directly
+          rating: newAvg,
           reviewCount: newCount,
         });
       } catch (e) {

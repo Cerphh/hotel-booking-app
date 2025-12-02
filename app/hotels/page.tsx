@@ -220,6 +220,8 @@ export default function HotelsPage() {
           const data = d.data() as DocumentData;
           const hotel: Hotel = {
             id: String(data.id ?? d.id),
+            // spread original data first so we can normalize specific fields below
+            ...data,
             name: data.name ?? data.title ?? "",
             latitude: typeof data.latitude === "number" ? data.latitude : parseFloat(String(data.latitude || "")) || undefined,
             longitude: typeof data.longitude === "number" ? data.longitude : parseFloat(String(data.longitude || "")) || undefined,
@@ -231,8 +233,46 @@ export default function HotelsPage() {
             roomType: data.roomType ?? data.room_type ?? "",
             amenities: Array.isArray(data.amenities) ? data.amenities : (data.amenities ? String(data.amenities).split(",").map((s: string) => s.trim()) : []),
             description: data.description ?? "",
-            ...data,
+            // Normalize rating and review count: some sources use `rating`/`reviews`, others `avgRating`/`reviewCount`
+            rating: typeof data.rating === "number"
+              ? data.rating
+              : data.avgRating && typeof data.avgRating === "number"
+              ? data.avgRating
+              : data.rating
+              ? Number(data.rating)
+              : data.avgRating
+              ? Number(data.avgRating)
+              : undefined,
+            reviewCount: typeof data.reviewCount === "number"
+              ? data.reviewCount
+              : typeof data.reviews === "number"
+              ? data.reviews
+              : data.reviewCount
+              ? Number(data.reviewCount)
+              : data.reviews
+              ? Number(data.reviews)
+              : undefined,
           };
+
+          // If rating looks like a total (e.g. 8 from two 4-star reviews) and we have a count,
+          // compute the average so the UI shows values in the 0-5 range.
+          try {
+            const rawRating = (hotel as any).rating;
+            const rawCount = (hotel as any).reviewCount ?? (hotel as any).reviews;
+
+            if (typeof rawRating === "number" && rawRating > 5 && typeof rawCount === "number" && rawCount > 0) {
+              // compute average and keep one decimal place like other parts of the app
+              const avg = Number((rawRating / rawCount).toFixed(1));
+              hotel.rating = avg;
+            }
+
+            // Ensure reviewCount is set from alternate fields if present
+            if ((hotel as any).reviewCount === undefined && typeof (hotel as any).reviews === "number") {
+              hotel.reviewCount = (hotel as any).reviews;
+            }
+          } catch (e) {
+            // defensive: if anything unexpected, leave original values
+          }
 
           // If address missing but coords exist, queue reverse geocode and merge back to Firestore (best-effort)
           if ((!hotel.address || hotel.address.trim() === "") && hotel.latitude && hotel.longitude) {
