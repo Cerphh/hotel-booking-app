@@ -64,6 +64,8 @@ interface Hotel {
   address?: string;
   image?: string;
   description?: string;
+  rating?: number;
+  reviewCount?: number;
   // any extra fields
   [k: string]: any;
 }
@@ -579,6 +581,17 @@ export default function HotelsPage() {
                         <p className="mt-1 line-clamp-1 text-xs text-zinc-600 dark:text-zinc-400">
                           {hotel.address}
                         </p>
+
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex gap-0" aria-hidden>
+                            {[1, 2, 3, 4, 5].map((i) => (
+                              <span key={i} className={`text-sm ${i <= Math.round(hotel.rating ?? 0) ? 'text-yellow-400' : 'text-zinc-300'}`}>
+                                ★
+                              </span>
+                            ))}
+                          </div>
+                          <div className="text-xs text-zinc-600 dark:text-zinc-400">{((hotel.reviewCount ?? 0) > 0 ? (hotel.rating ?? 5).toFixed(1) : '0.0')} · {hotel.reviewCount ?? 0} reviews</div>
+                        </div>
                       </div>
 
                       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -669,6 +682,14 @@ export default function HotelsPage() {
                             {hotel.price && (
                               <p className="text-xs font-semibold text-blue-600 mb-2">₱{hotel.price.toLocaleString()}</p>
                             )}
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className="flex text-sm" aria-hidden>
+                                  {[1, 2, 3, 4, 5].map((i) => (
+                                    <span key={i} className={`${i <= Math.round(hotel.rating ?? 0) ? 'text-yellow-400' : 'text-zinc-300'}`}>★</span>
+                                  ))}
+                                </div>
+                                <div className="text-xs text-zinc-600">{((hotel.reviewCount ?? 0) > 0 ? (hotel.rating ?? 5).toFixed(1) : '0.0')} · {hotel.reviewCount ?? 0} reviews</div>
+                              </div>
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleBook(hotel)}
@@ -745,6 +766,14 @@ export default function HotelsPage() {
                         {selectedHotel.price && (
                           <p>₱{selectedHotel.price.toLocaleString()} / {selectedHotel.currency ?? "PHP"}</p>
                         )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex text-sm" aria-hidden>
+                            {[1, 2, 3, 4, 5].map((i) => (
+                              <span key={i} className={`${i <= Math.round(selectedHotel.rating ?? 0) ? 'text-yellow-400' : 'text-zinc-300'}`}>★</span>
+                            ))}
+                          </div>
+                          <div className="text-xs text-zinc-100 dark:text-zinc-300">{((selectedHotel.reviewCount ?? 0) > 0 ? (selectedHotel.rating ?? 5).toFixed(1) : '0.0')} · {selectedHotel.reviewCount ?? 0} reviews</div>
+                        </div>
                       </div>
                     </Popup>
                   </Marker>

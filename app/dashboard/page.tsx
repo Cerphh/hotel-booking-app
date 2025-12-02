@@ -43,6 +43,7 @@ import {
   orderBy,
   onSnapshot,
   getDocs,
+  getDoc,
   FirestoreError,
   Timestamp,
   deleteDoc,
@@ -100,6 +101,8 @@ interface Booking {
   roomType?: string;
   availability?: number;
   price?: number;
+  rating?: number;
+  hotelId?: string;
 }
 
 interface Hotel {
@@ -183,6 +186,150 @@ export default function Dashboard() {
 
   const db = getFirestore(app);
 
+  // Save a rating for a booking (updates the bookings doc with `rating`)
+  const handleSaveRating = async (bookingId: string | undefined, rating: number) => {
+    if (!bookingId) return;
+    if (!user?.uid) return alert("Please sign in to leave a review");
+
+    try {
+      // update bookings doc with rating and reviewedAt
+      await updateDoc(doc(db, "bookings", bookingId), {
+        rating,
+        reviewedAt: Timestamp.now(),
+        reviewerId: user.uid,
+      });
+
+      // update local state so UI reflects change immediately
+      setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, rating } : b)));
+    } catch (err) {
+      console.error("Failed to save rating:", err);
+      alert("Failed to save rating. Please try again.");
+    }
+  };
+
+  // After saving a booking rating, update the related hotel's aggregated rating and review count
+  // This is best-effort: if we can identify the hotel (via booking.hotelId or matching name/coords)
+  // we read the hotel's current `rating` and `reviewCount` and update them accordingly.
+  const handleSaveRatingWithHotelUpdate = async (bookingId: string | undefined, rating: number) => {
+    // First save the booking rating
+    await handleSaveRating(bookingId, rating);
+
+    try {
+      const booking = bookings.find((b) => b.id === bookingId);
+      if (!booking) return;
+
+      const oldRating = booking.rating;
+
+      // Determine hotel document reference: prefer explicit hotelId when present
+      let hotelDocRef: any = null;
+      if (booking.hotelId) {
+        hotelDocRef = doc(db, "hotels", booking.hotelId);
+      } else {
+        // Try to find a matching hotel by name and coords (best-effort)
+        try {
+          const q = query(
+            collection(db, "hotels"),
+            where("name", "==", booking.hotelName)
+          );
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            // choose the hotel that matches coords if available
+            let chosen: any = snap.docs[0];
+            if (booking.lat != null && booking.lon != null) {
+              for (const d of snap.docs) {
+                const data = d.data() as any;
+                const lat = data.latitude ?? data.lat ?? data.locationLat ?? null;
+                const lon = data.longitude ?? data.lon ?? data.locationLon ?? null;
+                if (lat === booking.lat && lon === booking.lon) {
+                  chosen = d;
+                  break;
+                }
+              }
+            }
+            hotelDocRef = doc(db, "hotels", chosen.id);
+          }
+        } catch (e) {
+          console.warn("Failed to find hotel for rating aggregation:", e);
+        }
+      }
+
+      if (!hotelDocRef) return;
+
+      // Read current hotel aggregate values
+      try {
+        const hotelSnap = await getDoc(hotelDocRef as any);
+        if (!hotelSnap.exists()) return;
+        const h = hotelSnap.data() as any;
+        const currentAvg = Number(h.rating ?? h.avgRating ?? 0);
+        const count = Number(h.reviewCount ?? h.reviews ?? 0);
+
+        let newCount = count;
+        let newAvg = currentAvg;
+
+        if (oldRating === undefined || oldRating === null) {
+          // new review
+          newCount = count + 1;
+          newAvg = (currentAvg * count + rating) / newCount;
+        } else {
+          // updating existing review: adjust average without changing count
+          if (count <= 0) {
+            newCount = 1;
+            newAvg = rating;
+          } else {
+            newAvg = (currentAvg * count - oldRating + rating) / count;
+          }
+        }
+
+        await updateDoc(hotelDocRef as any, {
+          rating: Number(newAvg.toFixed(1)),
+          reviewCount: newCount,
+        });
+      } catch (e) {
+        console.warn("Failed to update hotel aggregates:", e);
+      }
+    } catch (e) {
+      // already logged in inner blocks
+    }
+  };
+
+  // Simple clickable star rating component
+  function StarRating({ bookingId, initial = 0, small = false }: { bookingId?: string | null; initial?: number | null; small?: boolean }) {
+    const [value, setValue] = useState<number>(initial ?? 0);
+    const [hover, setHover] = useState<number>(0);
+
+    // reflect external updates
+    useEffect(() => {
+      setValue(initial ?? 0);
+    }, [initial]);
+
+    // larger default size for more prominent stars
+    const sizeClass = small ? "text-base" : "text-3xl";
+
+    return (
+      <div className="flex items-center gap-3">
+        <div className="flex items-center" role="radiogroup" aria-label="Rating">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`${i} star`}
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover(0)}
+              onClick={async () => {
+                setValue(i);
+                await handleSaveRatingWithHotelUpdate(bookingId ?? undefined, i);
+              }}
+              className={`focus:outline-none leading-none ${sizeClass} ${((hover || value) >= i) ? "text-yellow-400" : "text-zinc-300"}`}
+            >
+              ★
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-zinc-600">{value > 0 ? `${value}.0` : "No rating"}</div>
+      </div>
+    );
+  }
+
   // Resolve image paths stored in bookings/hotels to public/ when a filename is used
   const resolveImageSrc = (url?: string | null) => {
     if (!url) return "/taal-gold.avif";
@@ -253,6 +400,8 @@ export default function Dashboard() {
             roomType: raw.roomType || raw.roomTypeName,
             availability: raw.availability,
             price: raw.price,
+            rating: raw.rating ?? undefined,
+            hotelId: raw.hotelId || raw.hotel?.id || raw.hotel_id || undefined,
           } as Booking;
 
           return booking;
@@ -999,11 +1148,16 @@ export default function Dashboard() {
                         </div>
 
                         <div className="flex flex-col items-end gap-2 md:min-w-[220px]">
-                          <div className="text-right text-xs text-zinc-600 dark:text-zinc-300">
-                            <p className="text-[11px] uppercase tracking-wide text-zinc-400">Total</p>
-                            <p className="text-lg font-semibold text-zinc-900 dark:text-white">
-                              ₱{booking.totalPrice.toLocaleString()}
-                            </p>
+                          <div className="flex items-center gap-3 mb-1">
+                            <div>
+                              <StarRating bookingId={booking.id} initial={(booking as any)?.rating ?? 0} small />
+                            </div>
+                            <div className="text-right text-xs text-zinc-600 dark:text-zinc-300">
+                              <p className="text-[11px] uppercase tracking-wide text-zinc-400">Total</p>
+                              <p className="text-lg font-semibold text-zinc-900 dark:text-white">
+                                ₱{booking.totalPrice.toLocaleString()}
+                              </p>
+                            </div>
                           </div>
                           <div className="flex flex-wrap justify-end gap-2">
                             <Button
@@ -1288,9 +1442,12 @@ export default function Dashboard() {
         <Dialog open={!!infoBooking} onOpenChange={() => setInfoBooking(null)}>
           <DialogContent className="max-w-3xl" showCloseButton={false}>
             <div className="flex items-start justify-between">
-              <div>
+                <div>
                 <h3 className="text-lg font-semibold">{infoBooking?.hotelName}</h3>
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">{infoBooking?.hotelLocation}</p>
+                <div className="mt-2">
+                  <StarRating bookingId={infoBooking?.id} initial={(infoBooking as any)?.rating ?? 0} small />
+                </div>
               </div>
               <div>
                 <button
@@ -1434,6 +1591,9 @@ export default function Dashboard() {
                 <div>
                   <h3 className="text-lg font-semibold">Update Booking</h3>
                   <p className="text-sm text-zinc-500 dark:text-zinc-400">{editBooking.hotelName}</p>
+                  <div className="mt-2">
+                    <StarRating bookingId={editBooking?.id} initial={(editBooking as any)?.rating ?? 0} small />
+                  </div>
                 </div>
                 <button
                   onClick={() => setEditBooking(null)}

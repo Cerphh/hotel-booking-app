@@ -81,10 +81,10 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
     try {
       const db = getFirestore(app);
         const imageSrc = resolveImageSrc(hotel.imageUrl);
-      const bookingData = {
+      const bookingData: Record<string, any> = {
         hotelId: hotel.id,
         hotelName: hotel.name,
-          hotelImage: imageSrc,
+        hotelImage: imageSrc,
         userEmail: user.email,
         userId: user.uid,
         userName: user.displayName || "Guest",
@@ -94,16 +94,24 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
         rooms,
         roomType: selectedRoomType?.name,
         bookingType,
-        hours: bookingType === "hourly" ? hours : undefined,
         totalPrice,
         status: "confirmed",
         bookingDate: new Date().toISOString(),
         createdAt: serverTimestamp(),
-        hotelCoordinates: {
+      };
+
+      // Only include hours when booking is hourly (avoid writing `undefined` to Firestore)
+      if (bookingType === "hourly") {
+        bookingData.hours = hours;
+      }
+
+      // Only include coordinates when available
+      if (typeof hotel.latitude === "number" || typeof hotel.longitude === "number") {
+        bookingData.hotelCoordinates = {
           latitude: hotel.latitude,
           longitude: hotel.longitude,
-        },
-      };
+        };
+      }
 
       await addDoc(collection(db, "bookings"), bookingData);
       
