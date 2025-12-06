@@ -213,4 +213,3 @@ Documentation:
 
 	The Request Admin panel surfaces user-submitted hotel requests and messages, with options to accept, follow up, or dismiss. The image emphasizes the triage workflow and status tracking for incoming requests. It helps illustrate how admins respond to community-sourced additions and feedback.
 
-If your image files use a different extension than `.png` (for example `.jpg`, `.avif`, or `.webp`), replace the filenames above with the correct extension in the `public/` folder. Place the actual screenshots in `public/` (for example `public/addhotel_features.png`) and the README will display them.
