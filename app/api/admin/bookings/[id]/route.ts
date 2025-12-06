@@ -33,20 +33,9 @@ function initAdmin() {
   return admin;
 }
 
-export async function PATCH(req: Request, { params }: { params: { id?: string } }) {
+export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    // params may be undefined in some dev environments; fallback to parsing URL
-    let id = params?.id;
-    if (!id) {
-      try {
-        const u = new URL(req.url);
-        const parts = u.pathname.split('/').filter(Boolean);
-        // Expecting [..., 'api', 'admin', 'bookings', '<id>']
-        id = parts[parts.length - 1];
-      } catch {
-        id = undefined;
-      }
-    }
+    const { id } = await context.params;
 
     if (!id) return NextResponse.json({ error: 'missing id' }, { status: 400 });
 

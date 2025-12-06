@@ -908,7 +908,21 @@ export default function Dashboard() {
 
   if (!user) redirect("/");
 
-  const upcomingBooking = bookings[0];
+  // Categorize bookings as upcoming or past based on checkout date
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const upcomingBookings = bookings.filter((booking) => {
+    const checkOutDate = new Date(booking.checkOutDate);
+    return checkOutDate >= today;
+  });
+
+  const pastBookings = bookings.filter((booking) => {
+    const checkOutDate = new Date(booking.checkOutDate);
+    return checkOutDate < today;
+  });
+
+  const upcomingBooking = upcomingBookings[0];
 
   return (
     <div className="min-h-screen bg-[#EFECE3] dark:bg-zinc-950 py-8 px-4 sm:px-6 lg:px-8">
@@ -1126,109 +1140,190 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
               ) : (
-                <motion.div
-                  className="space-y-3"
-                  variants={staggerContainer}
-                  initial="initial"
-                  animate="animate"
-                >
-                  {bookings.map((booking) => (
-                    <motion.div key={booking.id} variants={staggerItem}>
-                      <Card className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white/80 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 md:flex-row md:items-center md:justify-between">
-                        <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <CardTitle className="text-base font-semibold md:text-lg">
-                                {booking.hotelName}
-                              </CardTitle>
-                              <Badge variant="outline" className="text-[11px]">
-                                {booking.roomType || "Standard room"}
-                              </Badge>
-                            </div>
-                            <div className="mt-1 flex items-center text-xs text-zinc-500 dark:text-zinc-400">
-                              <MapPin className="mr-1.5 h-3.5 w-3.5" />
-                              <span className="line-clamp-1">
-                                {booking.hotelLocation || "Batangas, Philippines"}
-                              </span>
-                            </div>
-                          </div>
+                <>
+                  {/* Upcoming Bookings */}
+                  {upcomingBookings.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                        Upcoming Bookings
+                      </h3>
+                      <motion.div
+                        className="space-y-3"
+                        variants={staggerContainer}
+                        initial="initial"
+                        animate="animate"
+                      >
+                        {upcomingBookings.map((booking) => (
+                          <motion.div key={booking.id} variants={staggerItem}>
+                            <Card className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white/80 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/80 md:flex-row md:items-center md:justify-between">
+                              <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <CardTitle className="text-base font-semibold md:text-lg">
+                                      {booking.hotelName}
+                                    </CardTitle>
+                                    <Badge variant="outline" className="text-[11px]">
+                                      {booking.roomType || "Standard room"}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 flex items-center text-xs text-zinc-500 dark:text-zinc-400">
+                                    <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                    <span className="line-clamp-1">
+                                      {booking.hotelLocation || "Batangas, Philippines"}
+                                    </span>
+                                  </div>
+                                </div>
 
-                          <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-300 md:mt-0 md:w-64">
-                            <div className="flex items-center gap-2">
-                              <CalendarDays className="h-3.5 w-3.5" />
-                              <span>
-                                {booking.checkInDate} → {booking.checkOutDate}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <User2 className="h-3.5 w-3.5" />
-                              <span>{booking.guests} guest{booking.guests > 1 ? "s" : ""}</span>
-                            </div>
-                          </div>
-                        </div>
+                                <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-300 md:mt-0 md:w-64">
+                                  <div className="flex items-center gap-2">
+                                    <CalendarDays className="h-3.5 w-3.5" />
+                                    <span>
+                                      {booking.checkInDate} → {booking.checkOutDate}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <User2 className="h-3.5 w-3.5" />
+                                    <span>{booking.guests} guest{booking.guests > 1 ? "s" : ""}</span>
+                                  </div>
+                                </div>
+                              </div>
 
-                        <div className="flex flex-col items-end gap-2 md:min-w-[220px]">
-                          <div className="flex items-center gap-3 mb-1">
-                            <div>
-                              <StarRating bookingId={booking.id} initial={(booking as any)?.rating ?? 0} small />
-                            </div>
-                            <div className="text-right text-xs text-zinc-600 dark:text-zinc-300">
-                              <p className="text-[11px] uppercase tracking-wide text-zinc-400">Total</p>
-                              <p className="text-lg font-semibold text-zinc-900 dark:text-white">
-                                ₱{booking.totalPrice.toLocaleString()}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap justify-end gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setInfoBooking({ ...booking, hotelImage: resolveImageSrc(booking.hotelImage) })}
-                            >
-                              Info
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setMapBooking(booking)}
-                            >
-                              Map
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setEditBooking(booking)}
-                            >
-                              Edit
-                            </Button>
-                            {/* Show action based on booking status: allow cancel when pending, otherwise show accepted/rejected state */}
-                            {(((booking as any)?.status) ?? 'pending') === 'pending' ? (
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => setCancelConfirmBooking(booking)}
-                              >
-                                Cancel
-                              </Button>
-                            ) : (((booking as any)?.status) === 'accepted') ? (
-                              <Button size="sm" disabled className="bg-green-600 text-white">
-                                Accepted
-                              </Button>
-                            ) : (((booking as any)?.status) === 'rejected') ? (
-                              <Button size="sm" disabled className="bg-rose-600 text-white">
-                                Rejected
-                              </Button>
-                            ) : (
-                              <Button size="sm" disabled>
-                                {(booking as any)?.status ?? '—'}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  ))}
-                </motion.div>
+                              <div className="flex flex-col items-end gap-2 md:min-w-[220px]">
+                                <div className="flex items-center gap-3 mb-1">
+                                  <div>
+                                    <StarRating bookingId={booking.id} initial={(booking as any)?.rating ?? 0} small />
+                                  </div>
+                                  <div className="text-right text-xs text-zinc-600 dark:text-zinc-300">
+                                    <p className="text-[11px] uppercase tracking-wide text-zinc-400">Total</p>
+                                    <p className="text-lg font-semibold text-zinc-900 dark:text-white">
+                                      ₱{booking.totalPrice.toLocaleString()}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setInfoBooking({ ...booking, hotelImage: resolveImageSrc(booking.hotelImage) })}
+                                  >
+                                    Info
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setMapBooking(booking)}
+                                  >
+                                    Map
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setEditBooking(booking)}
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => setCancelConfirmBooking(booking)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    </div>
+                  )}
+
+                  {/* Past Bookings */}
+                  {pastBookings.length > 0 && (
+                    <div className="space-y-3 mt-6">
+                      <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                        Past Bookings
+                      </h3>
+                      <motion.div
+                        className="space-y-3"
+                        variants={staggerContainer}
+                        initial="initial"
+                        animate="animate"
+                      >
+                        {pastBookings.map((booking) => (
+                          <motion.div key={booking.id} variants={staggerItem}>
+                            <Card className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/50 p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50 md:flex-row md:items-center md:justify-between opacity-80">
+                              <div className="flex flex-1 flex-col gap-2 md:flex-row md:items-center">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <CardTitle className="text-base font-semibold md:text-lg">
+                                      {booking.hotelName}
+                                    </CardTitle>
+                                    <Badge variant="secondary" className="text-[11px]">
+                                      Completed
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[11px]">
+                                      {booking.roomType || "Standard room"}
+                                    </Badge>
+                                  </div>
+                                  <div className="mt-1 flex items-center text-xs text-zinc-500 dark:text-zinc-400">
+                                    <MapPin className="mr-1.5 h-3.5 w-3.5" />
+                                    <span className="line-clamp-1">
+                                      {booking.hotelLocation || "Batangas, Philippines"}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-300 md:mt-0 md:w-64">
+                                  <div className="flex items-center gap-2">
+                                    <CalendarDays className="h-3.5 w-3.5" />
+                                    <span>
+                                      {booking.checkInDate} → {booking.checkOutDate}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <User2 className="h-3.5 w-3.5" />
+                                    <span>{booking.guests} guest{booking.guests > 1 ? "s" : ""}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col items-end gap-2 md:min-w-[220px]">
+                                <div className="flex items-center gap-3 mb-1">
+                                  <div>
+                                    <StarRating bookingId={booking.id} initial={(booking as any)?.rating ?? 0} small />
+                                  </div>
+                                  <div className="text-right text-xs text-zinc-600 dark:text-zinc-300">
+                                    <p className="text-[11px] uppercase tracking-wide text-zinc-400">Total</p>
+                                    <p className="text-lg font-semibold text-zinc-900 dark:text-white">
+                                      ₱{booking.totalPrice.toLocaleString()}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setInfoBooking({ ...booking, hotelImage: resolveImageSrc(booking.hotelImage) })}
+                                  >
+                                    Info
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setMapBooking(booking)}
+                                  >
+                                    Map
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    </div>
+                  )}
+                </>
               )}
             </TabsContent>
 
