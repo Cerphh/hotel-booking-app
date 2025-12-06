@@ -69,59 +69,68 @@ Open http://localhost:3000
 
 ## FEATURES
 
+
 - `addhotel_features`
 
-	![/addhotel_features.png](/addhotel_features.png)
+	![](./public/addhotel_features.png)
 
 	The Add Hotel screen shows the form and fields used to register a new property, including details, photos, and amenity toggles. The image highlights inline validation, image upload previews, and the map pin picker for setting the precise location. It demonstrates how hosts can quickly create listings that immediately populate the public hotel directory.
 
+
 - `hotelmap_features`
 
-	![/hotelmap_features.png](/hotelmap_features.png)
+	![](./public/hotelmap_features.png)
 
 	The Hotel Map view displays hotels geographically with clustering and interactive popups for each property. This screenshot emphasizes filtering controls and map-driven search, enabling users to visually explore options and open quick booking modals from map markers. The combination of card and map views helps users compare nearby choices at a glance.
 
+
 - `mybookings_features`
 
-	![/mybookings_features.png](/mybookings_features.png)
+	![](./public/mybookings_features.png)
 
 	My Bookings presents a user's active and past reservations with status labels, dates, and quick actions (view, cancel). The image demonstrates clear grouping by upcoming and previous stays, plus contact and modification links for each booking. It focuses on a clean, trustworthy booking management experience for travellers.
 
+
 - `savedhotel_features`
 
-	![/savedhotel_features.png](/savedhotel_features.png)
+	![](./public/savedhotel_features.png)
 
 	Saved Hotels (favorites) shows properties the user has bookmarked for later, including quick access to price and map location. The screenshot highlights the saved list layout, easy removal, and one-click navigation to the hotel detail page. It underscores how users can curate a shortlist while planning their trip.
 
+
 - `hotelrequest_features`
 
-	![/hotelrequest_features.png](/hotelrequest_features.png)
+	![](./public/hotelrequest_features.png)
 
 	The Hotel Request flow shows a form for suggesting a new hotel or requesting a booking that isn't listed, capturing details and preferred dates. The image emphasizes submission confirmation and request status feedback to the user. This feature enables users to inform admins of missing properties or special availability needs.
 
+
 - `nearbyattractions_features`
 
-	![/nearbyattractions_features.png](/nearbyattractions_features.png)
+	![](./public/nearbyattractions_features.png)
 
 	Nearby Attractions displays curated recommendations (AI-powered with local fallback) alongside a small map and short descriptions for each point of interest. The screenshot highlights how recommendations are presented in-context on a hotel detail page so guests can easily plan activities. It showcases the integration of LLM-driven suggestions with geographic data.
 
 ## ADMIN FEATURES
 
+
 - `bookings_admin`
 
-	![/bookings_admin.png](/bookings_admin.png)
+	![](./public/bookings_admin.png)
 
 	The Bookings Admin screen lists pending and confirmed bookings with controls for approving, rejecting, or deleting entries. This image underscores administrative workflows for moderation and manual overrides, including quick access to booking details and customer contacts. It demonstrates how staff can manage booking lifecycle events efficiently.
 
+
 - `hotels_admin`
 
-	![/hotels_admin.png](/hotels_admin.png)
+	![](./public/hotels_admin.png)
 
 	The Hotels Admin view provides listing management tools: edit metadata, update availability, and remove problematic entries. The screenshot highlights bulk actions and individual edit dialogs to keep the catalog accurate. It showcases the main control surface for curating the platform's inventory.
 
+
 - `request_admin`
 
-	![/request_admin.png](/request_admin.png)
+	![](./public/request_admin.png)
 
 	The Request Admin panel surfaces user-submitted hotel requests and messages, with options to accept, follow up, or dismiss. The image emphasizes the triage workflow and status tracking for incoming requests. It helps illustrate how admins respond to community-sourced additions and feedback.
 
