@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CalendarDays, MapPin, Users } from "lucide-react";
+import { sendHotelNotification, sendGuestConfirmation } from "@/lib/email";
 
 interface Hotel {
   id: string;
@@ -114,7 +115,62 @@ export function BookingModal({ hotel, checkIn, checkOut, isOpen, onClose, onBook
         };
       }
 
-      await addDoc(collection(db, "bookings"), bookingData);
+      // Save booking to Firestore and get the booking ID
+      const bookingRef = await addDoc(collection(db, "bookings"), bookingData);
+      const bookingId = bookingRef.id;
+
+      // Send email notifications (don't wait for them, send in background)
+      // Note: Using mock email for demo until hotels have email field
+      const hotelEmail = (hotel as any).email || (hotel as any).contactEmail || "hotbookdemo@gmail.com";
+      
+      // Send guest confirmation
+      sendGuestConfirmation({
+        hotelName: hotel.name,
+        hotelEmail,
+        guestName: user.displayName || "Guest",
+        guestEmail: user.email || "",
+        checkIn,
+        checkOut,
+        guests,
+        rooms,
+        roomType: selectedRoomType?.name,
+        totalPrice,
+        bookingType,
+        hours: bookingType === "hourly" ? hours : undefined,
+        bookingId,
+      }).then(() => {
+        console.log("✅ Guest confirmation sent successfully");
+      }).catch((error) => {
+        console.error("❌ Failed to send guest confirmation:", error);
+        // Don't fail the booking if email fails
+      });
+
+      // Send hotel notification if we have their email
+      if (hotelEmail) {
+        console.log("📧 Sending hotel notification to:", hotelEmail);
+        sendHotelNotification({
+          hotelName: hotel.name,
+          hotelEmail,
+          guestName: user.displayName || "Guest",
+          guestEmail: user.email || "",
+          checkIn,
+          checkOut,
+          guests,
+          rooms,
+          roomType: selectedRoomType?.name,
+          totalPrice,
+          bookingType,
+          hours: bookingType === "hourly" ? hours : undefined,
+          bookingId,
+        }).then(() => {
+          console.log("✅ Hotel notification sent successfully to:", hotelEmail);
+        }).catch((error) => {
+          console.error("❌ Failed to send hotel notification:", error);
+          // Don't fail the booking if email fails
+        });
+      } else {
+        console.warn("⚠️ No hotel email available");
+      }
       
       toast.success(`Booking submitted for ${hotel.name}. Awaiting admin review.`);
       onBook();
