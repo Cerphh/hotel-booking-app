@@ -1215,20 +1215,25 @@ export default function Dashboard() {
                                   >
                                     Map
                                   </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setEditBooking(booking)}
-                                  >
-                                    Edit
-                                  </Button>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => setCancelConfirmBooking(booking)}
-                                  >
-                                    Cancel
-                                  </Button>
+                                  
+                                  {String(booking.status).toLowerCase() !== "accepted" && (
+                                    <>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setEditBooking(booking)}
+                                      >
+                                        Edit
+                                      </Button>
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => setCancelConfirmBooking(booking)}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             </Card>
