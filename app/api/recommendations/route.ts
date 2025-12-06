@@ -49,15 +49,17 @@ export async function GET(request: Request) {
 
     const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" at latitude ${lat}, longitude ${lon}. Below is a numbered list of real nearby places (gathered from OpenStreetMap) with their type, distance, and coordinates. From this list, select up to 8 places that a traveler would actually visit (prioritize restaurants, cafes, attractions, viewpoints, entertainment). Sort results by nearest first.
 
-Important: For each selected place include its latitude and longitude (use the coordinates from the candidate list if available). Return a single JSON object with a top-level "recommendations" array, each entry with these fields:
+CRITICAL: For each place, provide a UNIQUE, SPECIFIC description that describes what makes this particular place interesting or notable. DO NOT use generic phrases like "popular local attraction" or "well-known spot". Instead, describe what the place actually is (e.g., "Historic church with colonial architecture", "Scenic lakeside restaurant serving fresh seafood", "Viewpoint overlooking Taal Volcano").
+
+For each selected place include its latitude and longitude (use the coordinates from the candidate list if available). Return a single JSON object with a top-level "recommendations" array, each entry with these fields:
 - name (string)
 - type (string)
-- description (one sentence)
+- description (one unique, specific sentence describing this particular place)
 - distance (e.g. "350 m")
 - walkingTime (e.g. "6 min walk")
 - lat (number)
 - lon (number)
-- reason (short explanation)
+- reason (short explanation why a traveler would visit)
 - address (optional)
 - confidence ("high" or "low")
 

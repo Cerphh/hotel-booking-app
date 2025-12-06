@@ -38,7 +38,14 @@ export async function GET(request: Request) {
       try {
         const pois = await fetchPOIsFromOverpass(latNum, lonNum, 2000);
         const candidateLines = pois.slice(0, 40).map((p, i) => `${i + 1}. ${p.name} | ${p.type} | ${p.lat},${p.lon} | ${formatDistanceForPrompt(p.distanceMeters)} | ${p.address || ''}`).join('\n');
-        const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" at latitude ${latNum}, longitude ${lonNum}. Below is a numbered list of real nearby places (gathered from OpenStreetMap) with their type, distance, and coordinates. From this list, select up to 8 places that a traveler would actually visit (prioritize restaurants, cafes, attractions, viewpoints, entertainment). Sort results by nearest first.\n\nCandidates:\n${candidateLines}\n\nReturn only valid JSON with a top-level \"recommendations\" array. Each recommendation must include: name,type,description,distance,walkingTime,lat,lon,reason,address,confidence.`;
+        const prompt = `You are a precise travel concierge. The guest is staying at "${hotelName}" at latitude ${latNum}, longitude ${lonNum}. Below is a numbered list of real nearby places (gathered from OpenStreetMap) with their type, distance, and coordinates. From this list, select up to 8 places that a traveler would actually visit (prioritize restaurants, cafes, attractions, viewpoints, entertainment). Sort results by nearest first.
+
+CRITICAL: For each place, provide a UNIQUE, SPECIFIC description that describes what makes this particular place interesting or notable. DO NOT use generic phrases like "popular local attraction" or "well-known spot". Instead, describe what the place actually is (e.g., "Historic church with colonial architecture", "Scenic lakeside restaurant serving fresh seafood", "Viewpoint overlooking Taal Volcano").
+
+Candidates:
+${candidateLines}
+
+Return only valid JSON with a top-level "recommendations" array. Each recommendation must include: name,type,description (one unique, specific sentence),distance,walkingTime,lat,lon,reason,address,confidence.`;
 
         const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -144,31 +151,103 @@ export async function GET(request: Request) {
             const nearItems = cleanedItems.filter((p) => Number.isFinite(p.distanceMeters) && p.distanceMeters <= 5000).sort((a, b) => a.distanceMeters - b.distanceMeters);
 
           if (nearItems.length > 0) {
-            // Build a brief human-friendly one-line description for each POI.
+            // Build a unique, specific description for each POI based on its characteristics
             const capitalize = (s: string) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-            const briefDescriptionFor = (p: any) => {
+            
+            // Track which descriptions we've used to avoid repetition
+            const usedDescriptions = new Set<string>();
+            
+            const briefDescriptionFor = (p: any, idx: number) => {
               const t = String(p.type || '').toLowerCase();
               const cuisineRaw = p.cuisine ? String(p.cuisine) : '';
               const cuisine = cuisineRaw.split(';')[0]?.trim();
+              const name = p.name || '';
+              const tags = p.rawTags || {};
+              
+              // Generate unique descriptions based on available metadata
               if (t === 'restaurant') {
-                if (cuisine) return `${capitalize(cuisine)} restaurant`;
-                return 'Restaurant serving local dishes';
+                const options: string[] = [];
+                
+                if (cuisine && cuisine.toLowerCase() !== 'regional') {
+                  options.push(`${capitalize(cuisine)} restaurant offering authentic local flavors`);
+                }
+                if (name.toLowerCase().includes('seafood')) options.push('Fresh seafood restaurant with local specialties');
+                if (name.toLowerCase().includes('grill')) options.push('Grilled specialties and local cuisine');
+                if (name.toLowerCase().includes('buffet')) options.push('All-you-can-eat buffet with diverse menu');
+                if (name.toLowerCase().includes('haus')) options.push('Traditional eatery with home-style cooking');
+                if (name.toLowerCase().includes('lomi')) options.push('Specialty noodle house with authentic lomi');
+                
+                // Add varied fallback options based on index
+                const fallbacks = [
+                  'Family-friendly restaurant with local favorites',
+                  'Casual dining spot with regional specialties',
+                  'Restaurant featuring traditional Filipino cuisine',
+                  'Popular eatery known for authentic local dishes',
+                  'Dining establishment with homemade specialties',
+                  'Local restaurant with diverse menu options',
+                  'Established dining venue serving classic recipes',
+                  'Neighborhood restaurant with signature dishes',
+                ];
+                
+                options.push(...fallbacks);
+                
+                // Find first unused description
+                for (const desc of options) {
+                  if (!usedDescriptions.has(desc)) {
+                    usedDescriptions.add(desc);
+                    return desc;
+                  }
+                }
+                
+                // If all used, return index-based fallback
+                return fallbacks[idx % fallbacks.length];
               }
               if (t === 'cafe') {
-                if (cuisine) return `${capitalize(cuisine)} cafe`;
-                return 'Cafe and coffee shop';
+                const options = [];
+                if (name.toLowerCase().includes('coffee')) options.push('Artisan coffee shop with cozy ambiance');
+                if (cuisine && cuisine.toLowerCase().includes('bakery')) options.push('Cafe and bakery with fresh pastries');
+                
+                options.push(
+                  'Casual cafe perfect for coffee and light meals',
+                  'Cozy coffeehouse with local pastries',
+                  'Relaxing cafe with specialty drinks',
+                  'Charming spot for breakfast and brunch',
+                );
+                
+                for (const desc of options) {
+                  if (!usedDescriptions.has(desc)) {
+                    usedDescriptions.add(desc);
+                    return desc;
+                  }
+                }
+                return options[idx % options.length];
               }
-              if (t === 'bar' || t === 'pub') return 'Bar and nightlife spot';
-              if (t === 'attraction') return 'Popular local attraction';
-              if (t === 'park') return 'Public park';
-              return 'Place to visit';
+              if (t === 'bar' || t === 'pub') {
+                if (name.toLowerCase().includes('karaoke')) return 'Lively bar with karaoke entertainment';
+                const options = ['Local bar and social gathering spot', 'Casual pub with refreshing drinks', 'Neighborhood bar with friendly atmosphere'];
+                return options[idx % options.length];
+              }
+              if (t === 'attraction') {
+                if (tags.tourism === 'viewpoint') return 'Panoramic viewpoint with scenic vistas';
+                if (tags.tourism === 'museum') return 'Cultural museum showcasing local history';
+                if (tags.historic === 'yes' || tags.building === 'church') return 'Historic landmark with architectural significance';
+                if (name.toLowerCase().includes('park')) return 'Natural attraction and outdoor recreation area';
+                if (name.toLowerCase().includes('beach')) return 'Coastal attraction with beach access';
+                return `Notable ${tags['addr:city'] || 'local'} landmark worth visiting`;
+              }
+              if (t === 'park') {
+                if (tags.leisure === 'garden') return 'Landscaped garden and green space';
+                if (tags.leisure === 'playground') return 'Family-friendly park with playground facilities';
+                return 'Public park ideal for relaxation and walks';
+              }
+              return `Interesting ${t} in the area`;
             };
 
             const recommendations = nearItems.slice(0, 12).map((p: any, idx: number) => ({
               name: p.name,
               type: p.type || 'other',
               // brief one-line description using cuisine/tags when available
-              description: briefDescriptionFor(p),
+              description: briefDescriptionFor(p, idx),
               distance: formatDistanceForPrompt(p.distanceMeters),
               walkingTime: (p.distanceMeters && p.distanceMeters >= 0) ? `${Math.max(2, Math.round((p.distanceMeters/1000)/5*60))} min walk` : '',
               lat: p.lat,
