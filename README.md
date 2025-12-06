@@ -1,5 +1,7 @@
 # HotBook: An Intelligent and Flexible Hotel Booking Platform
 
+![](./public/intro_image.png)
+
 This project presents an innovative Hotel Booking Web Application that enhances the traditional booking experience through artificial intelligence and dynamic pricing technology. The system integrates an AI Trip Curator that personalizes travel recommendations based on user interests, and a FlexiStay Optimization feature that allows flexible stay durations with real-time price adjustments. By combining convenience, personalization, and flexibility, this platform aims to redefine how travelers plan and book accommodations.
 
 ## Overview
