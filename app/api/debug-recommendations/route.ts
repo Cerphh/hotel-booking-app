@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getNearbyRecommendations, fetchPOIsFromOverpass } from '@/lib/ollama';
 
-const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.NEXT_PUBLIC_OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || process.env.NEXT_PUBLIC_OPENAI_MODEL || 'gpt-3.5-turbo-16k';
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo-16k';
 
 export async function GET(request: Request) {
   try {
